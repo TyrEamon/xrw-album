@@ -120,6 +120,18 @@ async function writePhotoShards(snapshotGalleries) {
   };
 }
 
+function countUniqueSnapshotTags(snapshotGalleries) {
+  const unique = new Set();
+  for (const gallery of snapshotGalleries) {
+    if (!Array.isArray(gallery.tags)) continue;
+    for (const tag of gallery.tags) {
+      const name = String(tag || "").trim();
+      if (name) unique.add(name.toLocaleLowerCase());
+    }
+  }
+  return unique.size;
+}
+
 async function writeAlbumsAndManifest(snapshotGalleries) {
   const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
   const albums = new Map(baseAlbums.map((album) => [album.id, {
@@ -143,7 +155,8 @@ async function writeAlbumsAndManifest(snapshotGalleries) {
     albumCount: combined.length,
     photoCount: combined.reduce((count, album) => count + album.count, 0),
     maxPhotosPerAlbum: combined.reduce((maximum, album) => Math.max(maximum, album.count), 0),
-    snapshotAlbumCount: snapshotGalleries.length
+    snapshotAlbumCount: snapshotGalleries.length,
+    tagCount: countUniqueSnapshotTags(snapshotGalleries)
   };
   await fs.writeFile(path.join(outDir, "data/albums.json"), `${JSON.stringify(combined)}\n`);
   await fs.writeFile(path.join(outDir, "data/manifest.json"), `${JSON.stringify(manifest)}\n`);
@@ -159,9 +172,9 @@ function pagesIndex(html) {
   return html
     .replace('href="/favicon.svg?v=1"', `href="${basePath}/favicon.svg?v=1"`)
     .replace('href="/lib/fancybox.css?v=20260821-1"', `href="${basePath}/lib/fancybox.css?v=20260821-1"`)
-    .replace('href="/styles.css?v=20260821-3"', `href="${basePath}/styles.css?v=20260821-3"`)
+    .replace('href="/styles.css?v=20260821-7"', `href="${basePath}/styles.css?v=20260821-7"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
-    .replace('src="/app.js?v=20260821-3"', `src="${basePath}/app.js?v=20260821-3"`)
+    .replace('src="/app.js?v=20260821-7"', `src="${basePath}/app.js?v=20260821-7"`)
     .replace("  </head>", `${config}\n  </head>`);
 }
 
@@ -187,6 +200,7 @@ async function main() {
   console.log(`Album details: ${shardStats.albumDetailCount}`);
   console.log(`Photo detail shards: ${shardStats.shardCount}`);
   console.log(`Snapshot albums: ${snapshotGalleries.length}`);
+  console.log(`Unique tags: ${countUniqueSnapshotTags(snapshotGalleries)}`);
   console.log(`GitHub image proxy: ${githubImageBase || "disabled"}`);
 }
 

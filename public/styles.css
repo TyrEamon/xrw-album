@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;1,300&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,500;1,600&family=Fraunces:ital,wght@0,300;0,400;1,300&family=Great+Vibes&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 :root {
   color-scheme: dark;
@@ -15,7 +15,16 @@
   --control-bg: #050505;
   --danger: #e07070;
   --shadow: rgba(0, 0, 0, 0.72);
+  /* Rouge = editorial annotation accent (stat brackets, Velvet in light). Kept
+     separate from copper --accent so controls stay copper. */
+  --rouge: #a84444;
+  --rouge-bright: #b94f50;
+  --velvet-ink: #f3ece5;
   --font-display: "Fraunces", Georgia, serif;
+  /* Velvet wordmark: calligraphy (Great Vibes). To try the serif look
+     instead, swap this to "Cormorant Garamond", "Fraunces", Georgia, serif;
+     and set .hero-velvet { font-style: italic }. */
+  --font-velvet: "Great Vibes", "Cormorant Garamond", cursive;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
   --font-cn: "PingFang SC", "Songti SC", "Noto Serif SC", serif;
@@ -38,6 +47,9 @@
     --accent-contrast: #fffaf3;
     --control-bg: #f2ece2;
     --shadow: rgba(66, 51, 36, 0.18);
+    --rouge: #a94d4d;
+    --rouge-bright: #c15b5b;
+    --velvet-ink: #a94d4d;
   }
 }
 
@@ -55,6 +67,9 @@
   --accent-contrast: #fffaf3;
   --control-bg: #f2ece2;
   --shadow: rgba(66, 51, 36, 0.18);
+  --rouge: #a94d4d;
+  --rouge-bright: #c15b5b;
+  --velvet-ink: #a94d4d;
 }
 
 *,
@@ -115,8 +130,8 @@ img {
 
 .home-header {
   max-width: var(--max);
-  margin: 0 auto clamp(40px, 5vw, 72px);
-  padding: clamp(28px, 4vw, 44px) var(--gutter) clamp(30px, 4vw, 54px);
+  margin: 0 auto clamp(20px, 3vw, 32px);
+  padding: clamp(28px, 4vw, 44px) var(--gutter) clamp(22px, 3vw, 32px);
   display: grid;
   grid-template-columns: auto minmax(220px, 460px) auto;
   align-items: center;
@@ -236,6 +251,125 @@ img {
   height: 14px;
 }
 
+.home-hero {
+  max-width: var(--max);
+  margin: 0 auto clamp(26px, 4vw, 40px);
+  padding: clamp(6px, 2vw, 18px) var(--gutter) clamp(20px, 3vw, 30px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  align-items: center;
+  gap: clamp(24px, 4vw, 48px);
+  border-bottom: 1px solid var(--line);
+  min-height: clamp(150px, 20vw, 200px);
+}
+
+.hero-stats {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(28px, 5vw, 64px);
+  padding-left: clamp(0px, 2vw, 24px);
+}
+
+.hero-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.hero-stat-en {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.hero-stat-cn {
+  font-family: var(--font-cn);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+
+.hero-stat-num {
+  position: relative;
+  margin-top: 4px;
+  padding: 4px 12px;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 3.4vw, 42px);
+  font-weight: 400;
+  line-height: 1;
+  color: var(--velvet-ink);
+  letter-spacing: -0.01em;
+}
+
+.hero-stat:nth-child(2) .hero-stat-num {
+  font-size: clamp(33px, 3.8vw, 46px);
+}
+
+.hero-stat-num::before,
+.hero-stat-num::after {
+  content: "";
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--rouge);
+}
+
+.hero-stat-num::before {
+  top: 0;
+  left: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.hero-stat-num::after {
+  bottom: 0;
+  right: 0;
+  border-left: 0;
+  border-top: 0;
+}
+
+.hero-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  min-width: 0;
+}
+
+.hero-velvet {
+  margin: 0;
+  font-family: var(--font-velvet);
+  font-style: normal;
+  font-weight: 400;
+  font-size: clamp(84px, 10vw, 150px);
+  line-height: 1.02;
+  color: var(--velvet-ink);
+  letter-spacing: 0.01em;
+  padding: 0 0.08em 0.12em;
+  overflow: visible;
+}
+
+.hero-tagline-en {
+  margin: 10px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.hero-tagline-cn {
+  margin: 6px 0 0;
+  font-family: var(--font-cn);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+
 .home-body,
 .detail {
   max-width: var(--max);
@@ -251,15 +385,15 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: clamp(14px, 3vw, 28px);
+  gap: clamp(28px, 5vw, 72px);
   margin-bottom: clamp(28px, 4vw, 44px);
 }
 
 .home-tabs {
   display: inline-grid;
-  grid-template-columns: repeat(3, minmax(145px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
-  width: min(100%, 720px);
+  width: min(100%, 680px);
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -269,11 +403,11 @@ img {
 .home-tab {
   min-width: 0;
   min-height: 54px;
-  padding: 10px 16px;
+  padding: 10px 12px;
   border-radius: 2px;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 12px;
+  gap: 2px 8px;
   align-items: center;
   color: var(--ink-3);
   text-align: left;
@@ -292,16 +426,18 @@ img {
 
 .home-tab-title {
   font-family: var(--font-cn);
-  font-size: 16px;
-  letter-spacing: 0.05em;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
 .home-tab-sub,
 .home-tab-count {
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.16em;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .home-tab-sub {
@@ -318,6 +454,20 @@ img {
 .tab-refresh.is-hidden {
   visibility: hidden;
   pointer-events: none;
+}
+
+.album-order-btn {
+  flex: 0 0 auto;
+  text-transform: none;
+}
+
+.album-order-btn span {
+  font-family: var(--font-cn);
+  letter-spacing: 0.08em;
+}
+
+.album-order-btn.is-hidden {
+  display: none;
 }
 
 .tab-tools {
@@ -1178,6 +1328,43 @@ img {
 }
 
 @media (max-width: 760px) {
+  .home-hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    gap: 18px;
+    min-height: 0;
+    padding-top: 4px;
+  }
+
+  .hero-brand {
+    order: -1;
+    align-items: center;
+    text-align: center;
+  }
+
+  .hero-velvet {
+    font-size: clamp(66px, 22vw, 104px);
+  }
+
+  .hero-stats {
+    width: 100%;
+    padding-left: 0;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .hero-stats::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hero-stat {
+    flex: 0 0 auto;
+  }
+
   .albums-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 40px 16px;
@@ -1193,7 +1380,7 @@ img {
   }
 
   .home-tabs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
 

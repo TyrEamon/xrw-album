@@ -106,6 +106,20 @@ function createTabsState() {
       seed: String(Date.now()),
       photoLayoutKey: ""
     },
+    albums: {
+      albums: [],
+      pages: [],
+      page: 0,
+      total: 0,
+      hasMore: true,
+      loading: false,
+      prefetch: null,
+      prefetching: false,
+      prefetchKey: "",
+      prefetchPromise: null,
+      seed: "albums",
+      order: "desc"
+    },
     recent: {
       albums: [],
       pages: [],
@@ -148,7 +162,8 @@ const icons = {
   arrow: lucideIcon("arrow-up-right", '<path d="M7 7h10v10M7 17 17 7"/>'),
   back: lucideIcon("chevron-left", '<path d="m15 18-6-6 6-6"/>'),
   heart: lucideIcon("heart", '<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>'),
-  up: lucideIcon("arrow-up", '<path d="m5 12 7-7 7 7M12 19V5"/>')
+  up: lucideIcon("arrow-up", '<path d="m5 12 7-7 7 7M12 19V5"/>'),
+  sort: lucideIcon("arrow-up-down", '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>')
 };
 
 function escapeHtml(value) {
@@ -230,6 +245,7 @@ async function staticGetJson(url, options = {}) {
       ok: true,
       albumCount: manifest.albumCount,
       photoCount: manifest.photoCount,
+      tagCount: Number(manifest.tagCount) || 0,
       builtAt: manifest.builtAt
     };
   }
@@ -664,10 +680,10 @@ function albumCard(album, index, eager = index < 8) {
 function headerTemplate(manifest) {
   return `
     <header class="home-header">
-      <div class="brand" aria-label="墨影集">
+      <div class="brand" aria-label="绮影志 VELVET ARCHIVE">
         <span class="brand-mark"></span>
-        <span class="brand-title">墨影集</span>
-        <span class="brand-sub">MM Archive</span>
+        <span class="brand-title">绮影志</span>
+        <span class="brand-sub">VELVET ARCHIVE</span>
       </div>
       <label class="search-box">
         ${icons.search}
@@ -678,6 +694,34 @@ function headerTemplate(manifest) {
         ${themeButton()}
       </div>
     </header>
+  `;
+}
+
+function heroStat(en, cn, value) {
+  return `
+    <div class="hero-stat" role="listitem">
+      <span class="hero-stat-en">${en}</span>
+      <span class="hero-stat-cn">${cn}</span>
+      <span class="hero-stat-num">${formatCount(value)}</span>
+    </div>
+  `;
+}
+
+function heroTemplate(manifest) {
+  const tagCount = Number(manifest.tagCount) || 0;
+  return `
+    <section class="home-hero" aria-label="档案概览">
+      <div class="hero-stats" role="list">
+        ${heroStat("Collections", "图集", manifest.albumCount)}
+        ${heroStat("Photos", "照片", manifest.photoCount)}
+        ${tagCount ? heroStat("Tags", "标签", tagCount) : ""}
+      </div>
+      <div class="hero-brand">
+        <h2 class="hero-velvet">Velvet</h2>
+        <p class="hero-tagline-en">COSPLAY · PORTRAIT · BOUDOIR</p>
+        <p class="hero-tagline-cn">光影成集，留一点旖旎</p>
+      </div>
+    </section>
   `;
 }
 
@@ -729,6 +773,7 @@ function homeTemplate(data) {
   return `
     <div class="page-enter">
       ${headerTemplate(data.manifest)}
+      ${heroTemplate(data.manifest)}
       <main class="home-body">
         <div id="search-results" class="search-results" hidden></div>
         <div id="home-tabs">
@@ -736,10 +781,15 @@ function homeTemplate(data) {
             <div class="tabs-head">
               <div class="home-tabs" role="tablist" aria-label="图库分类">
                 ${tabButtonTemplate("photos", "全部图片", "All Photos")}
+                ${tabButtonTemplate("albums", "全部图集", "All Collections")}
                 ${tabButtonTemplate("recent", "最近更新", "Telegraph Archive")}
                 ${tabButtonTemplate("random", "随机漫游", "Original Archive")}
               </div>
               <div class="tab-tools">
+                <button type="button" class="refresh-btn album-order-btn ${activeTab === "albums" ? "" : "is-hidden"}" data-album-order aria-label="切换图集排序方向">
+                  ${icons.sort}
+                  <span data-album-order-label>${tabs.albums.order === "asc" ? "最早" : "最新"}</span>
+                </button>
                 <div class="photo-order-control ${activeTab === "photos" ? "" : "is-hidden"}" data-photo-order-control role="group" aria-label="全部图片排序">
                   <button type="button" class="photo-order-btn ${tabs.photos.mode === "sequence" ? "active" : ""}" data-photo-mode="sequence" aria-pressed="${tabs.photos.mode === "sequence"}">顺序</button>
                   <button type="button" class="photo-order-btn ${tabs.photos.mode === "random" ? "active" : ""}" data-photo-mode="random" aria-pressed="${tabs.photos.mode === "random"}">随机</button>
@@ -832,6 +882,7 @@ async function renderHome() {
     homeManifest = {
       albumCount: health.albumCount,
       photoCount: health.photoCount,
+      tagCount: Number(health.tagCount) || 0,
       builtAt: health.builtAt
     };
   }
@@ -861,6 +912,7 @@ function bindHomeControls() {
       app.querySelector("[data-random-refresh]")?.classList.toggle("is-hidden", activeTab !== "random");
       app.querySelector("[data-photo-size]")?.classList.toggle("is-hidden", activeTab !== "photos");
       app.querySelector("[data-photo-order-control]")?.classList.toggle("is-hidden", activeTab !== "photos");
+      app.querySelector("[data-album-order]")?.classList.toggle("is-hidden", activeTab !== "albums");
       if (!searchQuery) {
         window.scrollTo({ top: 0, behavior: "instant" });
         await showActiveTab();
@@ -887,6 +939,30 @@ function bindHomeControls() {
     activeTab = "random";
     await showActiveTab();
     setTimeout(() => button.classList.remove("spinning"), 700);
+  });
+
+  app.querySelector("[data-album-order]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const nextOrder = tabs.albums.order === "asc" ? "desc" : "asc";
+    tabs.albums = {
+      albums: [],
+      pages: [],
+      page: 0,
+      total: 0,
+      hasMore: true,
+      loading: false,
+      prefetch: null,
+      prefetching: false,
+      prefetchKey: "",
+      prefetchPromise: null,
+      seed: "albums",
+      order: nextOrder
+    };
+    const label = button.querySelector("[data-album-order-label]");
+    if (label) label.textContent = nextOrder === "asc" ? "最早" : "最新";
+    activeTab = "albums";
+    window.scrollTo({ top: 0, behavior: "instant" });
+    await showActiveTab();
   });
 
   app.querySelectorAll("[data-photo-mode]").forEach((button) => {
@@ -1404,6 +1480,20 @@ function tabPageRequest(tab, page) {
     return {
       key: `photos:${state.mode}:${state.seed}:${page}:${PHOTO_PAGE_SIZE}`,
       url: `/api/photos?${params.toString()}`
+    };
+  }
+
+  if (tab === "albums") {
+    const mode = state.order === "asc" ? "albums" : "recent";
+    const params = new URLSearchParams({
+      mode,
+      page: String(page),
+      limit: String(PAGE_SIZE),
+      seed: state.seed
+    });
+    return {
+      key: `albums:${mode}:${page}:${PAGE_SIZE}`,
+      url: `/api/albums?${params.toString()}`
     };
   }
 
