@@ -2,10 +2,15 @@ package snapshot
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/TyrEamon/xrw-album/publisher/internal/model"
@@ -18,7 +23,15 @@ type Batch struct {
 	Galleries  []model.PublishPayload `json:"galleries"`
 }
 
-func Export(ctx context.Context, database *store.Store, outDir string, limit int) (string, int, error) {
+type Options struct {
+	ImageBase     string
+	SigningSecret string
+}
+
+func Export(ctx context.Context, database *store.Store, outDir string, limit int, options Options) (string, int, error) {
+	if err := options.validate(); err != nil {
+		return "", 0, err
+	}
 	candidates, err := database.PendingSnapshots(ctx, limit)
 	if err != nil || len(candidates) == 0 {
 		return "", 0, err
@@ -29,6 +42,21 @@ func Export(ctx context.Context, database *store.Store, outDir string, limit int
 		payload, err := database.Payload(ctx, candidate.GalleryID, candidate.ChannelID)
 		if err != nil {
 			return "", 0, fmt.Errorf("snapshot gallery %d: %w", candidate.GalleryID, err)
+		}
+		if options.ImageBase != "" {
+			if len(payload.Photos) != len(payload.TGFiles) {
+				return "", 0, fmt.Errorf("snapshot gallery %d: photo and Telegram mapping counts differ", candidate.GalleryID)
+			}
+			for index := range payload.Photos {
+				imageURL, err := SignedTelegramURL(options.ImageBase, options.SigningSecret, payload.TGFiles[index].FileID)
+				if err != nil {
+					return "", 0, fmt.Errorf("snapshot gallery %d image %d: %w", candidate.GalleryID, payload.Photos[index].SourceImageID, err)
+				}
+				payload.Photos[index].TGURL = imageURL
+			}
+			if len(payload.Photos) > 0 {
+				payload.Cover = payload.Photos[0].TGURL
+			}
 		}
 		payload.TGFiles = nil
 		payloads = append(payloads, payload)
@@ -65,4 +93,32 @@ func Export(ctx context.Context, database *store.Store, outDir string, limit int
 		return "", 0, err
 	}
 	return target, len(payloads), nil
+}
+
+func (options Options) validate() error {
+	if options.ImageBase == "" && options.SigningSecret == "" {
+		return nil
+	}
+	if options.ImageBase == "" || options.SigningSecret == "" {
+		return fmt.Errorf("GIMG_PUBLIC_BASE and GIMG_SIGNING_SECRET must be configured together")
+	}
+	if len(options.SigningSecret) < 32 {
+		return fmt.Errorf("GIMG_SIGNING_SECRET must be at least 32 characters")
+	}
+	parsed, err := url.Parse(options.ImageBase)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("GIMG_PUBLIC_BASE must be an HTTPS origin without query or fragment")
+	}
+	return nil
+}
+
+func SignedTelegramURL(imageBase, secret, fileID string) (string, error) {
+	if strings.TrimSpace(fileID) == "" {
+		return "", fmt.Errorf("Telegram file_id is empty")
+	}
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fileID))
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(payload))
+	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return strings.TrimRight(imageBase, "/") + "/tg/" + payload + "." + signature, nil
 }

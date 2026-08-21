@@ -41,8 +41,9 @@ jobs:
         working-directory: site
         run: npm run build:gh-pages
         env:
-          GITHUB_PAGES_BASE: xrw-album
+          GITHUB_PAGES_BASE: /
           SNAPSHOT_DATA_DIR: ../snapshot-data/batches
+          GIMG_PUBLIC_BASE: https://gimg.mtcacg.top
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

@@ -5,11 +5,34 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "dist-gh-pages");
-const repoName = process.env.GITHUB_PAGES_BASE || "xrw-album";
-const basePath = `/${repoName.replace(/^\/+|\/+$/g, "")}`;
+const repoName = process.env.GITHUB_PAGES_BASE ?? "xrw-album";
+const normalizedRepoName = repoName.replace(/^\/+|\/+$/g, "");
+const basePath = normalizedRepoName ? `/${normalizedRepoName}` : "";
 const snapshotDir = process.env.SNAPSHOT_DATA_DIR
   ? path.resolve(rootDir, process.env.SNAPSHOT_DATA_DIR)
   : "";
+const githubImageBase = String(process.env.GIMG_PUBLIC_BASE || "").replace(/\/+$/g, "");
+
+function rewriteGitHubImageUrl(value) {
+  if (!githubImageBase || typeof value !== "string" || value === "") return value;
+  try {
+    const source = new URL(value);
+    if (source.hostname.toLowerCase() !== "telegra.ph" || !source.pathname.startsWith("/file/")) return value;
+    return `${githubImageBase}/telegraph${source.pathname}`;
+  } catch {
+    return value;
+  }
+}
+
+function rewriteGalleryImages(gallery) {
+  return {
+    ...gallery,
+    cover: rewriteGitHubImageUrl(gallery.cover),
+    photos: Array.isArray(gallery.photos)
+      ? gallery.photos.map((photo) => ({ ...photo, url: rewriteGitHubImageUrl(photo.url) }))
+      : gallery.photos
+  };
+}
 
 async function copyFile(source, target) {
   await fs.mkdir(path.dirname(target), { recursive: true });
@@ -50,7 +73,7 @@ async function loadSnapshotGalleries() {
         if (!gallery?.id || !Array.isArray(gallery.photos) || gallery.photos.length !== gallery.count) {
           throw new Error(`Invalid snapshot gallery in ${file}: ${gallery?.id || "unknown"}`);
         }
-        galleries.set(gallery.id, gallery);
+        galleries.set(gallery.id, rewriteGalleryImages(gallery));
       }
     }
     return [...galleries.values()].sort((left, right) => left.source_gallery_id - right.source_gallery_id);
@@ -71,7 +94,8 @@ async function writePhotoShards(snapshotGalleries) {
     const id = file.slice(0, -".json".length);
     const shard = photoShardKey(id);
     if (!shards.has(shard)) shards.set(shard, {});
-    shards.get(shard)[id] = JSON.parse(await fs.readFile(path.join(photosDir, file), "utf8"));
+    const gallery = JSON.parse(await fs.readFile(path.join(photosDir, file), "utf8"));
+    shards.get(shard)[id] = rewriteGalleryImages(gallery);
   }
 
   for (const gallery of snapshotGalleries) {
@@ -98,7 +122,10 @@ async function writePhotoShards(snapshotGalleries) {
 
 async function writeAlbumsAndManifest(snapshotGalleries) {
   const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
-  const albums = new Map(baseAlbums.map((album) => [album.id, album]));
+  const albums = new Map(baseAlbums.map((album) => [album.id, {
+    ...album,
+    cover: rewriteGitHubImageUrl(album.cover)
+  }]));
   for (const gallery of snapshotGalleries) {
     albums.set(gallery.id, {
       id: gallery.id,
@@ -135,7 +162,7 @@ function pagesIndex(html) {
     .replace('href="/styles.css?v=20260821-1"', `href="${basePath}/styles.css?v=20260821-1"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
     .replace('src="/app.js?v=20260821-1"', `src="${basePath}/app.js?v=20260821-1"`)
-    .replace("    <script>\n      (function () {", `${config}\n    <script>\n      (function () {`);
+    .replace("  </head>", `${config}\n  </head>`);
 }
 
 async function main() {
@@ -160,6 +187,7 @@ async function main() {
   console.log(`Album details: ${shardStats.albumDetailCount}`);
   console.log(`Photo detail shards: ${shardStats.shardCount}`);
   console.log(`Snapshot albums: ${snapshotGalleries.length}`);
+  console.log(`GitHub image proxy: ${githubImageBase || "disabled"}`);
 }
 
 main().catch((error) => {

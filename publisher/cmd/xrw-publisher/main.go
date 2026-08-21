@@ -109,12 +109,20 @@ func main() {
 		flags := flag.NewFlagSet("snapshot", flag.ExitOnError)
 		outDir := flags.String("out", "snapshot/batches", "directory for sanitized snapshot batches")
 		maximum := flags.Int("max", 1000, "maximum galleries in one batch")
+		reset := flags.Bool("reset", false, "re-export completed galleries using the current snapshot URL format")
 		_ = flags.Parse(os.Args[2:])
 		if *maximum < 1 {
 			logger.Error("snapshot maximum must be positive")
 			os.Exit(2)
 		}
-		file, count, err := snapshot.Export(ctx, database, *outDir, *maximum)
+		if *reset {
+			resetCount, err := database.ResetSnapshotExports(ctx)
+			fatalIf(logger, err)
+			logger.Info("snapshot export markers reset", "galleries", resetCount)
+		}
+		file, count, err := snapshot.Export(ctx, database, *outDir, *maximum, snapshot.Options{
+			ImageBase: cfg.GitHubImageBase, SigningSecret: cfg.GitHubImageSecret,
+		})
 		fatalIf(logger, err)
 		logger.Info("snapshot export complete", "galleries", count, "file", file)
 	default:

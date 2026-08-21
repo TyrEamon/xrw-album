@@ -606,6 +606,14 @@ ON CONFLICT(source_gallery_id) DO UPDATE SET
 	return tx.Commit()
 }
 
+func (s *Store) ResetSnapshotExports(ctx context.Context) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM snapshot_exports`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	stats := Stats{}
 	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM galleries GROUP BY status`)

@@ -38,7 +38,10 @@ func TestExportWritesSanitizedIncrementalBatch(t *testing.T) {
 	}
 
 	outDir := filepath.Join(t.TempDir(), "batches")
-	file, count, err := Export(ctx, database, outDir, 100)
+	secret := strings.Repeat("s", 32)
+	file, count, err := Export(ctx, database, outDir, 100, Options{
+		ImageBase: "https://gimg.example.com", SigningSecret: secret,
+	})
 	if err != nil || count != 1 {
 		t.Fatalf("export count=%d file=%q err=%v", count, file, err)
 	}
@@ -50,12 +53,29 @@ func TestExportWritesSanitizedIncrementalBatch(t *testing.T) {
 	if strings.Contains(text, "secret-file-id") || strings.Contains(text, "tg_files") {
 		t.Fatalf("snapshot leaked Telegram private mapping: %s", text)
 	}
-	if !strings.Contains(text, "veil-40") || !strings.Contains(text, "veil-400") {
+	if !strings.Contains(text, "veil-40") || !strings.Contains(text, "https://gimg.example.com/tg/") {
 		t.Fatalf("snapshot is missing public gallery data: %s", text)
 	}
+	if strings.Contains(text, "https://album.example/file/veil-400") {
+		t.Fatalf("snapshot retained the D1-backed image URL: %s", text)
+	}
 
-	file, count, err = Export(ctx, database, outDir, 100)
+	file, count, err = Export(ctx, database, outDir, 100, Options{
+		ImageBase: "https://gimg.example.com", SigningSecret: secret,
+	})
 	if err != nil || count != 0 || file != "" {
 		t.Fatalf("second export was not empty: count=%d file=%q err=%v", count, file, err)
+	}
+}
+
+func TestExportRejectsIncompleteImageWorkerConfiguration(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "publisher.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, _, err = Export(context.Background(), database, t.TempDir(), 1, Options{ImageBase: "https://gimg.example.com"})
+	if err == nil {
+		t.Fatal("expected incomplete gimg configuration to fail")
 	}
 }

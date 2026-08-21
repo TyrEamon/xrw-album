@@ -135,13 +135,23 @@ vnstat -m
 
 ## GitHub Pages 增量快照
 
-`snapshot` 命令只导出状态为 `ready / ok` 且自上次成功导出后发生变化的完整图集。公开批次包含标题、标签、图片地址和宽高，不包含 Telegram `file_id` 等私有映射：
+`snapshot` 命令只导出状态为 `ready / ok` 且自上次成功导出后发生变化的完整图集。配置 `GIMG_PUBLIC_BASE` 与 `GIMG_SIGNING_SECRET` 后，公开批次把 Telegram `file_id` 转成不可篡改的 `gimg` 签名地址；批次仍不包含原始 `file_id`。GitHub Pages 看图时由独立 `gimg` Worker 验签并取图，完全不查 D1：
 
 ```bash
 ./xrw-publisher snapshot -out /var/lib/xrw-publisher/github-snapshot/batches -max 1000
 ```
 
+启用 `gimg` 后，旧快照需要一次性重导出，后续定时任务恢复增量模式：
+
+```bash
+./xrw-publisher snapshot -reset -out /var/lib/xrw-publisher/github-snapshot/batches -max 1000
+```
+
+若完整图集超过单批 `-max`，不要再次加 `-reset`，让后续定时运行继续导出剩余图集。仓库变量 `GIMG_PUBLIC_BASE` 只负责在Pages构建时把旧 Telegraph 地址改写为 `gimg` 反代；签名密钥只保存在VPS和Worker secret中，绝不放进GitHub仓库或快照。
+
 配套的 `xrw-publisher-snapshot.timer` 每15分钟运行一次同步脚本；没有新增图集时不会产生提交。VPS只向 `snapshot` 分支追加脱敏批次，该分支推送不触发Pages。Pages工作流固定每3小时检出最新快照并部署，网站代码推送到 `main` 时仍会立即部署。
+
+两套图片Worker相互独立：桌面的 `xrw-album-gimg-worker` 服务GitHub Pages，不绑定D1；仓库内 `cf-image-worker` 部署为 `xrw-album-cimg`，绑定现有D1并服务CF站。它们和根目录主站分别使用不同Worker名称，部署其中一个不会覆盖另外两个。
 
 ## VPS 与节点
 

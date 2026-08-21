@@ -20,6 +20,8 @@ type Config struct {
 	TGChatIDs         []string
 	TGAPIBase         string
 	ImagePublicBase   string
+	GitHubImageBase   string
+	GitHubImageSecret string
 	TGUploadInterval  time.Duration
 	TGGlobalInterval  time.Duration
 	TGMaxConcurrent   int
@@ -45,6 +47,8 @@ func Load() (Config, error) {
 		TGChatIDs:         telegramChats(),
 		TGAPIBase:         strings.TrimRight(env("TG_API_BASE", "https://api.telegram.org"), "/"),
 		ImagePublicBase:   strings.TrimRight(strings.TrimSpace(os.Getenv("IMAGE_PUBLIC_BASE")), "/"),
+		GitHubImageBase:   strings.TrimRight(strings.TrimSpace(os.Getenv("GIMG_PUBLIC_BASE")), "/"),
+		GitHubImageSecret: strings.TrimSpace(os.Getenv("GIMG_SIGNING_SECRET")),
 		TGUploadInterval:  envDuration("TG_UPLOAD_INTERVAL", 3500*time.Millisecond),
 		TGGlobalInterval:  envDuration("TG_GLOBAL_INTERVAL", 500*time.Millisecond),
 		TGMaxConcurrent:   envInt("TG_MAX_CONCURRENT", 3),
