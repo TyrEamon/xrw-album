@@ -183,7 +183,7 @@ function pagesIndex(html) {
     .replace('href="/lib/fancybox.css?v=20260821-1"', `href="${basePath}/lib/fancybox.css?v=20260821-1"`)
     .replace('href="/styles.css?v=20260822-3"', `href="${basePath}/styles.css?v=20260822-3"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
-    .replace('src="/app.js?v=20260822-3"', `src="${basePath}/app.js?v=20260822-3"`)
+    .replace('src="/app.js?v=20260822-4"', `src="${basePath}/app.js?v=20260822-4"`)
     .replace("  </head>", `${config}\n  </head>`);
 }
 

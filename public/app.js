@@ -612,7 +612,7 @@ function currentTheme() {
     stored = null;
   }
   if (stored === "light" || stored === "dark") return stored;
-  return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return "dark";
 }
 
 function themeButton() {
