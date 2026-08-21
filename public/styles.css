@@ -465,8 +465,7 @@ img {
 }
 
 .tab-refresh.is-hidden {
-  visibility: hidden;
-  pointer-events: none;
+  display: none;
 }
 
 .album-order-btn {
@@ -1401,7 +1400,7 @@ img {
     width: 100%;
     min-width: 0;
     flex-wrap: wrap;
-    justify-content: stretch;
+    justify-content: flex-end;
   }
 
   .photo-order-control {
