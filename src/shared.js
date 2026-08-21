@@ -150,11 +150,12 @@ export async function homePayload(store, url) {
 
 export async function albumsPayload(store, url) {
   const query = (url.searchParams.get("q") || "").trim().toLocaleLowerCase();
+  const tag = (url.searchParams.get("tag") || "").trim().toLocaleLowerCase();
   const mode = url.searchParams.get("mode") || "all";
   const seed = url.searchParams.get("seed") || "default";
   const page = Math.max(1, Number(url.searchParams.get("page") || 1));
   const limit = Math.min(48, Math.max(8, Number(url.searchParams.get("limit") || 24)));
-  const result = await store.albums({ query, mode, seed, page, limit });
+  const result = await store.albums({ query, tag, mode, seed, page, limit });
 
   return {
     ok: true,
@@ -171,13 +172,19 @@ export async function albumPayload(store, albumId) {
   const album = await store.album(albumId);
   if (!album) return null;
 
-  const detail = await store.albumDetail(albumId);
+  const [detail, tags] = await Promise.all([
+    store.albumDetail(albumId),
+    typeof store.albumTags === "function" ? store.albumTags(albumId) : []
+  ]);
   if (!detail) return null;
+
+  const normalized = normalizeDetail(detail);
 
   return {
     ok: true,
     album: withLike(album),
-    photos: normalizeDetail(detail).photos,
+    tags: Array.isArray(tags) && tags.length ? tags : (Array.isArray(normalized.tags) ? normalized.tags : []),
+    photos: normalized.photos,
     likeCount: album.likes || 0
   };
 }

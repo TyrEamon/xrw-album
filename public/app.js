@@ -25,6 +25,7 @@ let infiniteObserver = null;
 let searchTimer = null;
 let searchPage = 1;
 let searchQuery = "";
+let searchTag = "";
 let currentAlbum = null;
 let lightboxIndex = null;
 let detailImageScale = readDetailImageScale();
@@ -281,6 +282,7 @@ async function staticGetJson(url, options = {}) {
     return {
       ok: true,
       album: withStaticLike(album),
+      tags: normalizeTags(detail.tags || album.tags),
       photos: detail.photos.map((photo) => ({
         ...photo,
         url: normalizeImageUrl(photo.url)
@@ -363,12 +365,15 @@ function staticShuffledAlbums(albums, seedValue) {
 async function staticAlbumsResponse(requestUrl) {
   const albums = await staticAlbums();
   const query = (requestUrl.searchParams.get("q") || "").trim().toLocaleLowerCase();
+  const tag = (requestUrl.searchParams.get("tag") || "").trim().toLocaleLowerCase();
   const mode = requestUrl.searchParams.get("mode") || "all";
   const seed = requestUrl.searchParams.get("seed") || "default";
   const page = Math.max(1, Number(requestUrl.searchParams.get("page") || 1));
   const limit = Math.min(48, Math.max(8, Number(requestUrl.searchParams.get("limit") || 24)));
-  const matched = query
-    ? albums.filter((album) => album.title.toLocaleLowerCase().includes(query))
+  const matched = tag
+    ? albums.filter((album) => normalizeTags(album.tags).some((name) => name.toLocaleLowerCase() === tag))
+    : query
+      ? albums.filter((album) => album.title.toLocaleLowerCase().includes(query))
     : mode === "recent"
       ? [...albums].reverse()
       : mode === "random"
@@ -690,7 +695,7 @@ function headerTemplate(manifest) {
       </div>
       <label class="search-box">
         ${icons.search}
-        <input class="search-input" name="q" type="search" placeholder="搜索图集" value="${escapeHtml(searchQuery)}" autocomplete="off">
+        <input class="search-input" name="q" type="search" placeholder="搜索图集" value="${escapeHtml(searchTag || searchQuery)}" autocomplete="off">
       </label>
       <div class="header-actions">
         <span class="archive-count">${hasAlbumCount ? formatCount(manifest.albumCount) : "--"} Sets</span>
@@ -710,6 +715,13 @@ function heroStat(en, cn, value) {
       <span class="hero-stat-num"${hasValue ? ` data-count-up="${target}" aria-label="${formatCount(target)}"` : ""} aria-live="off">--</span>
     </div>
   `;
+}
+
+function normalizeTags(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((tag) => String(tag || "").trim())
+    .filter(Boolean))];
 }
 
 function animateHeroStats(root) {
@@ -934,6 +946,8 @@ function errorPanel(error) {
 }
 
 async function renderHome() {
+  searchTag = (new URLSearchParams(location.search).get("tag") || "").trim();
+  if (searchTag) searchQuery = "";
   if (!homeManifest) {
     app.innerHTML = pendingHomeTemplate();
     bindThemeButtons(app);
@@ -953,7 +967,7 @@ async function renderHome() {
   bindThemeButtons(app);
   bindBackToTop();
   bindHomeControls();
-  if (searchQuery) {
+  if (searchQuery || searchTag) {
     await runSearch(1);
   } else {
     await showActiveTab();
@@ -973,7 +987,7 @@ function bindHomeControls() {
       app.querySelector("[data-photo-size]")?.classList.toggle("is-hidden", activeTab !== "photos");
       app.querySelector("[data-photo-order-control]")?.classList.toggle("is-hidden", activeTab !== "photos");
       app.querySelector("[data-album-order]")?.classList.toggle("is-hidden", activeTab !== "albums");
-      if (!searchQuery) {
+      if (!searchQuery && !searchTag) {
         window.scrollTo({ top: 0, behavior: "instant" });
         await showActiveTab();
       }
@@ -1049,11 +1063,15 @@ function bindHomeControls() {
     app.querySelectorAll("[data-home-size-value], [data-size-value]").forEach((node) => {
       node.textContent = `${detailImageScale}%`;
     });
-    if (activeTab === "photos" && !searchQuery) renderTabGrid({ force: true });
+    if (activeTab === "photos" && !searchQuery && !searchTag) renderTabGrid({ force: true });
   });
 
   const input = app.querySelector(".search-input");
   input.addEventListener("input", () => {
+    if (searchTag) {
+      searchTag = "";
+      history.replaceState({}, "", appUrl("/"));
+    }
     searchQuery = input.value.trim();
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
@@ -1154,7 +1172,7 @@ function unrenderAlbumPage(entry) {
 }
 
 function syncVisibleAlbumPages(options = {}) {
-  if (appPathname() !== "/" || activeTab === "photos" || searchQuery) return;
+  if (appPathname() !== "/" || activeTab === "photos" || searchQuery || searchTag) return;
   const state = tabs[activeTab];
   const grid = app.querySelector("[data-tab-grid]");
   if (!state?.pages || !grid) return;
@@ -1203,7 +1221,7 @@ function appendAlbumPage(tab, data) {
   };
   state.pages.push(entry);
   state.albums.push(...data.albums);
-  if (appPathname() !== "/" || activeTab !== tab || searchQuery) return;
+  if (appPathname() !== "/" || activeTab !== tab || searchQuery || searchTag) return;
 
   const grid = app.querySelector("[data-tab-grid]");
   if (!grid) return;
@@ -1220,7 +1238,7 @@ function renderAlbumTabGrid(tab, options = {}) {
   const state = tabs[tab];
   const grid = app.querySelector("[data-tab-grid]");
   if (!state || !grid) return;
-  if (appPathname() !== "/" || activeTab !== tab || searchQuery) return;
+  if (appPathname() !== "/" || activeTab !== tab || searchQuery || searchTag) return;
 
   const wasAlbumGrid = grid.dataset.gridKind === `albums:${tab}`;
   grid.className = "album-pages";
@@ -1341,11 +1359,11 @@ function renderPhotoPage(entry, options = {}) {
 }
 
 function schedulePhotoRelayout() {
-  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery) return;
+  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
   clearTimeout(photoRelayoutTimer);
   photoRelayoutTimer = setTimeout(() => {
     photoRelayoutTimer = null;
-    if (appPathname() !== "/" || activeTab !== "photos" || searchQuery) return;
+    if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
     renderPhotoTabGrid({ force: true });
   }, 420);
 }
@@ -1362,7 +1380,7 @@ function unrenderPhotoPage(entry) {
 }
 
 function syncVisiblePhotoPages(options = {}) {
-  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery) return;
+  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
   const state = tabs.photos;
   const grid = app.querySelector("[data-tab-grid]");
   if (!grid) return;
@@ -1404,7 +1422,7 @@ function appendPhotoPage(data) {
   if (state.photos.length > expectedStart) return;
 
   state.photos.push(...data.photos);
-  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery) return;
+  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
 
   const grid = app.querySelector("[data-tab-grid]");
   if (!grid) return;
@@ -1416,7 +1434,7 @@ function renderPhotoTabGrid(options = {}) {
   const state = tabs.photos;
   const grid = app.querySelector("[data-tab-grid]");
   if (!grid) return;
-  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery) return;
+  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
 
   const config = photoLayoutConfig(grid);
   if (config.width < 100) return;
@@ -1466,7 +1484,7 @@ function renderInfiniteStatus() {
 function setupInfiniteScroll() {
   infiniteObserver?.disconnect();
   const sentinel = app.querySelector("[data-infinite-sentinel]");
-  if (!sentinel || searchQuery || activeTab === "photos") return;
+  if (!sentinel || searchQuery || searchTag || activeTab === "photos") return;
 
   infiniteObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) {
@@ -1507,7 +1525,7 @@ async function loadMoreActiveTab() {
     updateTabCounts();
     updatePhotoOrderButtons();
 
-    if (activeTab !== tab || searchQuery) return;
+    if (activeTab !== tab || searchQuery || searchTag) return;
     renderInfiniteStatus();
     scheduleNextPagePrefetch(tab);
     return;
@@ -1521,7 +1539,7 @@ async function loadMoreActiveTab() {
   appendAlbumPage(tab, data);
   updateTabCounts();
 
-  if (activeTab !== tab || searchQuery) return;
+  if (activeTab !== tab || searchQuery || searchTag) return;
   renderInfiniteStatus();
   scheduleNextPagePrefetch(tab);
 }
@@ -1594,13 +1612,13 @@ async function loadTabPage(tab, page) {
 }
 
 function scheduleNextPagePrefetch(tab) {
-  if (searchQuery || appPathname() !== "/") return;
+  if (searchQuery || searchTag || appPathname() !== "/") return;
   setTimeout(() => prefetchNextTabPage(tab), PREFETCH_DELAY);
 }
 
 function prefetchNextTabPage(tab) {
   const state = tabs[tab];
-  if (!state || state.loading || !state.hasMore || searchQuery) return;
+  if (!state || state.loading || !state.hasMore || searchQuery || searchTag) return;
 
   const nextPage = state.page + 1;
   const request = tabPageRequest(tab, nextPage);
@@ -1668,7 +1686,7 @@ function onHomeScroll() {
     return;
   }
 
-  if (appPathname() !== "/" || searchQuery) return;
+  if (appPathname() !== "/" || searchQuery || searchTag) return;
   if (activeTab === "photos") requestPhotoPageSync();
   else requestAlbumPageSync();
   if (sentinelNearViewport()) {
@@ -1681,7 +1699,7 @@ function onHomeScroll() {
 }
 
 function renderHomePhotoGridOnResize() {
-  if (appPathname() !== "/" || searchQuery) return;
+  if (appPathname() !== "/" || searchQuery || searchTag) return;
   clearTimeout(photoResizeTimer);
   photoResizeTimer = setTimeout(() => {
     if (activeTab === "photos") renderPhotoTabGrid({ force: true });
@@ -1694,7 +1712,7 @@ async function runSearch(page) {
   const tabsContainer = app.querySelector("#home-tabs");
   if (!results || !tabsContainer) return;
 
-  if (!searchQuery) {
+  if (!searchQuery && !searchTag) {
     results.hidden = true;
     results.innerHTML = "";
     tabsContainer.hidden = false;
@@ -1710,8 +1728,8 @@ async function runSearch(page) {
     <section class="home-section home-section-first">
       <div class="section-head">
         <div>
-          <h2 class="section-title">搜索结果</h2>
-          <p class="section-sub">Searching Archive</p>
+          <h2 class="section-title">${searchTag ? `标签：${escapeHtml(searchTag)}` : "搜索结果"}</h2>
+          <p class="section-sub">${searchTag ? "Tagged Collections" : "Searching Archive"}</p>
         </div>
       </div>
       <div class="detail-loading">
@@ -1722,13 +1740,16 @@ async function runSearch(page) {
     </section>
   `;
 
-  const data = await getJson(`/api/albums?q=${encodeURIComponent(searchQuery)}&page=${page}&limit=24`);
+  const filterParam = searchTag
+    ? `tag=${encodeURIComponent(searchTag)}`
+    : `q=${encodeURIComponent(searchQuery)}`;
+  const data = await getJson(`/api/albums?${filterParam}&page=${page}&limit=24`);
   const hasMore = data.page * data.limit < data.total;
   results.innerHTML = `
     <section class="home-section home-section-first">
       <div class="section-head">
         <div>
-          <h2 class="section-title">搜索结果</h2>
+          <h2 class="section-title">${searchTag ? `标签：${escapeHtml(searchTag)}` : "搜索结果"}</h2>
           <p class="section-sub">${formatCount(data.total)} Matches</p>
         </div>
       </div>
@@ -1749,7 +1770,10 @@ async function appendSearch() {
 
   more.textContent = "加载中";
   const nextPage = searchPage + 1;
-  const data = await getJson(`/api/albums?q=${encodeURIComponent(searchQuery)}&page=${nextPage}&limit=24`);
+  const filterParam = searchTag
+    ? `tag=${encodeURIComponent(searchTag)}`
+    : `q=${encodeURIComponent(searchQuery)}`;
+  const data = await getJson(`/api/albums?${filterParam}&page=${nextPage}&limit=24`);
   searchPage = nextPage;
   grid.insertAdjacentHTML("beforeend", data.albums.map((album, index) => albumCard(album, grid.children.length + index)).join(""));
   bindAlbumCards(grid);
@@ -1761,6 +1785,7 @@ async function appendSearch() {
 function detailTemplate(data) {
   const album = data.album;
   const bannerImage = data.photos[0]?.url || album.cover || "";
+  const tags = normalizeTags(data.tags || album.tags);
   return `
     <main class="detail page-enter">
       <div class="detail-top">
@@ -1773,10 +1798,15 @@ function detailTemplate(data) {
           ${themeButton()}
         </div>
       </div>
-      <section class="detail-banner">
+      <section class="detail-banner ${tags.length ? "has-tags" : ""}">
         ${bannerImage ? `<img class="detail-banner-image" src="${escapeHtml(bannerImage)}" alt="" aria-hidden="true" decoding="async" fetchpriority="high">` : ""}
         <div class="detail-banner-content">
           <h1 class="detail-title">${escapeHtml(album.title)}</h1>
+          ${tags.length ? `
+            <div class="detail-tags" aria-label="图集标签">
+              ${tags.map((tag) => `<button type="button" class="detail-tag" data-album-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`).join("")}
+            </div>
+          ` : ""}
           <div class="detail-like-row">
             <div class="detail-like-group">
               <button type="button" class="album-like" data-like-album>
@@ -1821,6 +1851,12 @@ async function renderAlbum(id) {
     else navigate("/");
   });
   app.querySelector("[data-like-album]").addEventListener("click", () => likeAlbum());
+  app.querySelectorAll("[data-album-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tag = button.dataset.albumTag;
+      if (tag) navigate(`/?tag=${encodeURIComponent(tag)}`);
+    });
+  });
   bindDetailControls();
   renderDetailRows();
   window.addEventListener("resize", renderDetailRowsOnResize, { passive: true });

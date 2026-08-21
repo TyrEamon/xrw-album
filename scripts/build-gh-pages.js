@@ -61,6 +61,13 @@ function photoShardKey(id) {
   return id.slice(0, 3);
 }
 
+function normalizedTags(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((tag) => String(tag || "").trim())
+    .filter(Boolean))];
+}
+
 async function loadSnapshotGalleries() {
   if (!snapshotDir) return [];
   try {
@@ -106,6 +113,7 @@ async function writePhotoShards(snapshotGalleries) {
       title: gallery.title,
       count: gallery.count,
       cover: gallery.cover,
+      tags: normalizedTags(gallery.tags),
       photos: gallery.photos
     };
   }
@@ -144,7 +152,8 @@ async function writeAlbumsAndManifest(snapshotGalleries) {
       title: gallery.title,
       count: gallery.count,
       cover: gallery.cover,
-      href: gallery.href || `/album/${gallery.id}`
+      href: gallery.href || `/album/${gallery.id}`,
+      tags: normalizedTags(gallery.tags)
     });
   }
   const combined = [...albums.values()].map((album, order) => ({ ...album, order }));
@@ -172,9 +181,9 @@ function pagesIndex(html) {
   return html
     .replace('href="/favicon.svg?v=1"', `href="${basePath}/favicon.svg?v=1"`)
     .replace('href="/lib/fancybox.css?v=20260821-1"', `href="${basePath}/lib/fancybox.css?v=20260821-1"`)
-    .replace('href="/styles.css?v=20260821-11"', `href="${basePath}/styles.css?v=20260821-11"`)
+    .replace('href="/styles.css?v=20260822-1"', `href="${basePath}/styles.css?v=20260822-1"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
-    .replace('src="/app.js?v=20260821-10"', `src="${basePath}/app.js?v=20260821-10"`)
+    .replace('src="/app.js?v=20260822-1"', `src="${basePath}/app.js?v=20260822-1"`)
     .replace("  </head>", `${config}\n  </head>`);
 }
 

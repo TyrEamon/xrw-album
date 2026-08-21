@@ -48,6 +48,11 @@ const details = new Map([
   }]
 ]);
 
+const tagsByAlbum = new Map([
+  ["album-a", ["Cosplay", "NIKKE"]],
+  ["album-b", ["Portrait"]]
+]);
+
 class FakeD1Result {
   constructor(rows) {
     this.rows = rows;
@@ -117,6 +122,34 @@ class FakeD1 {
   }
 
   query(sql, params) {
+    if (sql.includes("SELECT t.name FROM album_tags")) {
+      return new FakeD1Result((tagsByAlbum.get(params[0]) || []).map((name) => ({ name })));
+    }
+
+    if (sql.includes("COUNT(DISTINCT a.id)") && sql.includes("JOIN album_tags")) {
+      const tag = String(params[0]).toLowerCase();
+      const total = this.rows.filter((row) => (tagsByAlbum.get(row.id) || [])
+        .some((name) => name.toLowerCase() === tag)).length;
+      return new FakeD1Result([{ total }]);
+    }
+
+    if (sql.includes("SELECT DISTINCT a.id") && sql.includes("JOIN album_tags")) {
+      const tag = String(params[0]).toLowerCase();
+      const rows = this.rows.filter((row) => (tagsByAlbum.get(row.id) || [])
+        .some((name) => name.toLowerCase() === tag));
+      const limit = params.at(-2);
+      const offset = params.at(-1);
+      return new FakeD1Result(rows.slice(offset, offset + limit).map((row) => ({
+        id: row.id,
+        title: row.title,
+        count: row.count,
+        cover: row.cover,
+        href: row.href,
+        album_order: row.order,
+        likes: this.albumLikes.get(row.id) || 0
+      })));
+    }
+
     if (sql.includes("INSERT INTO likes_albums") && sql.includes("ON CONFLICT(album_id)")) {
       const [albumId, delta] = params;
       this.albumLikes.set(albumId, (this.albumLikes.get(albumId) || 0) + delta);
@@ -276,11 +309,17 @@ async function main() {
   assert.equal(search.body.total, 1);
   assert.equal(search.body.albums[0].id, "album-a");
 
+  const tagged = await json("/api/albums?tag=nikke&limit=8");
+  assert.equal(tagged.status, 200);
+  assert.equal(tagged.body.total, 1);
+  assert.equal(tagged.body.albums[0].id, "album-a");
+
   const detail = await json("/api/album/album-a");
   assert.equal(detail.status, 200);
   assert.equal(detail.body.album.id, "album-a");
   assert.equal(detail.body.photos[0].url, "https://telegra.ph/file/a.jpg");
   assert.equal(detail.body.photos[0].width, 1200);
+  assert.deepEqual(detail.body.tags, ["Cosplay", "NIKKE"]);
 
   const photos = await json("/api/photos?mode=sequence&page=1&limit=24");
   assert.equal(photos.status, 200);

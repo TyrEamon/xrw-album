@@ -35,7 +35,7 @@ class D1Store {
     return this.manifestCache;
   }
 
-  async albums({ query = "", mode = "all", seed = "default", page = 1, limit = 24 }) {
+  async albums({ query = "", tag = "", mode = "all", seed = "default", page = 1, limit = 24 }) {
     const offset = (page - 1) * limit;
     const countWhere = query
       ? "WHERE publish_status = 'ok' AND title_lc LIKE ?"
@@ -44,10 +44,15 @@ class D1Store {
       ? "WHERE a.publish_status = 'ok' AND a.title_lc LIKE ?"
       : "WHERE a.publish_status = 'ok'";
     const params = query ? [`%${query}%`] : [];
-    const totalRow = await this.db
-      .prepare(`SELECT COUNT(*) AS total FROM albums ${countWhere}`)
-      .bind(...params)
-      .first();
+    const totalRow = tag
+      ? await this.db.prepare(`
+          SELECT COUNT(DISTINCT a.id) AS total
+          FROM albums a
+          JOIN album_tags at ON at.album_id = a.id
+          JOIN tags t ON t.id = at.tag_id
+          WHERE a.publish_status = 'ok' AND t.name_lc = ?
+        `).bind(tag).first()
+      : await this.db.prepare(`SELECT COUNT(*) AS total FROM albums ${countWhere}`).bind(...params).first();
     const total = Number(totalRow?.total || 0);
 
     const order = mode === "recent"
@@ -56,14 +61,25 @@ class D1Store {
         ? "ORDER BY ((a.album_order * ? + ?) % 2147483647), a.album_order"
         : "ORDER BY a.album_order ASC";
     const orderParams = mode === "random" ? [1103515245, seedFrom(seed)] : [];
-    const rows = await this.db.prepare(`
-      SELECT a.id, a.title, a.count, a.cover, a.href, a.album_order, COALESCE(l.count, 0) AS likes
-      FROM albums a
-      LEFT JOIN likes_albums l ON l.album_id = a.id
-      ${listWhere}
-      ${order}
-      LIMIT ? OFFSET ?
-    `).bind(...params, ...orderParams, limit, offset).all();
+    const rows = tag
+      ? await this.db.prepare(`
+          SELECT DISTINCT a.id, a.title, a.count, a.cover, a.href, a.album_order, COALESCE(l.count, 0) AS likes
+          FROM albums a
+          JOIN album_tags at ON at.album_id = a.id
+          JOIN tags t ON t.id = at.tag_id
+          LEFT JOIN likes_albums l ON l.album_id = a.id
+          WHERE a.publish_status = 'ok' AND t.name_lc = ?
+          ${order}
+          LIMIT ? OFFSET ?
+        `).bind(tag, ...orderParams, limit, offset).all()
+      : await this.db.prepare(`
+          SELECT a.id, a.title, a.count, a.cover, a.href, a.album_order, COALESCE(l.count, 0) AS likes
+          FROM albums a
+          LEFT JOIN likes_albums l ON l.album_id = a.id
+          ${listWhere}
+          ${order}
+          LIMIT ? OFFSET ?
+        `).bind(...params, ...orderParams, limit, offset).all();
 
     return { total, albums: rows.results || [] };
   }
@@ -96,6 +112,17 @@ class D1Store {
     }
     this.detailCache.set(albumId, detail);
     return detail;
+  }
+
+  async albumTags(albumId) {
+    const rows = await this.db.prepare(`
+      SELECT t.name
+      FROM album_tags at
+      JOIN tags t ON t.id = at.tag_id
+      WHERE at.album_id = ?
+      ORDER BY t.name_lc, t.id
+    `).bind(albumId).all();
+    return (rows.results || []).map((row) => row.name).filter(Boolean);
   }
 
   async albumByPhotoOffset(offset) {
