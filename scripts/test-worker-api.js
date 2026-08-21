@@ -32,8 +32,8 @@ const details = new Map([
     count: 2,
     cover: "https://telegra.phhttps://legra.ph/file/a.jpg",
     photos: [
-      { id: 1, url: "https://telegra.phhttps://legra.ph/file/a.jpg" },
-      { id: 2, url: "https://telegra.ph/file/a2.jpg" }
+      { id: 1, url: "https://telegra.phhttps://legra.ph/file/a.jpg", width: 1200, height: 1800 },
+      { id: 2, url: "https://telegra.ph/file/a2.jpg", width: 1600, height: 1200 }
     ]
   }],
   ["album-b", {
@@ -41,8 +41,9 @@ const details = new Map([
     title: "Beta Album",
     count: 1,
     cover: "https://telegra.ph/file/b.jpg",
+    photo_format: "compact-v1",
     photos: [
-      { id: 1, url: "https://telegra.ph/file/b.jpg" }
+      [1, 42, 900, 1200, "/file/veil-42"]
     ]
   }]
 ]);
@@ -101,6 +102,7 @@ class FakeD1 {
     this.photoLikes = new Map();
     this.rows = albums.map((album) => ({
       ...album,
+      publish_status: "ok",
       start_offset: album.order === 0 ? 0 : 2,
       end_offset: album.order === 0 ? 2 : 3
     }));
@@ -110,7 +112,26 @@ class FakeD1 {
     return new FakeD1Statement(this, sql.replace(/\s+/g, " ").trim());
   }
 
+  async batch(statements) {
+    return Promise.all(statements.map((statement) => statement.run()));
+  }
+
   query(sql, params) {
+    if (sql.includes("INSERT INTO likes_albums") && sql.includes("ON CONFLICT(album_id)")) {
+      const [albumId, delta] = params;
+      this.albumLikes.set(albumId, (this.albumLikes.get(albumId) || 0) + delta);
+      return new FakeD1Result([]);
+    }
+
+    if (sql.includes("INSERT INTO likes_photos") && sql.includes("json_each")) {
+      const [albumId, encodedLikes] = params;
+      for (const like of JSON.parse(encodedLikes)) {
+        const key = `${albumId}:${like.photoId}`;
+        this.photoLikes.set(key, (this.photoLikes.get(key) || 0) + like.delta);
+      }
+      return new FakeD1Result([]);
+    }
+
     if (sql.includes("FROM meta WHERE key = 'manifest'")) {
       return new FakeD1Result([{ value: JSON.stringify({
         builtAt: "2026-07-03T00:00:00.000Z",
@@ -121,7 +142,7 @@ class FakeD1 {
       }) }]);
     }
 
-    if (sql.includes("WHERE start_offset <= ? AND end_offset > ?")) {
+    if (sql.includes("start_offset <= ? AND end_offset > ?")) {
       const offset = params[0];
       const row = this.rows.find((album) => album.start_offset <= offset && album.end_offset > offset);
       return new FakeD1Result(row ? [{
@@ -159,7 +180,7 @@ class FakeD1 {
         const term = String(params[0]).replaceAll("%", "");
         rows = rows.filter((row) => row.title.toLowerCase().includes(term));
       }
-      if (sql.includes("ORDER BY album_order DESC")) rows.reverse();
+      if (sql.includes("ORDER BY a.album_order DESC")) rows.reverse();
       const limit = params.at(-2);
       const offset = params.at(-1);
       return new FakeD1Result(rows.slice(offset, offset + limit).map((row) => ({
@@ -259,6 +280,7 @@ async function main() {
   assert.equal(detail.status, 200);
   assert.equal(detail.body.album.id, "album-a");
   assert.equal(detail.body.photos[0].url, "https://telegra.ph/file/a.jpg");
+  assert.equal(detail.body.photos[0].width, 1200);
 
   const photos = await json("/api/photos?mode=sequence&page=1&limit=24");
   assert.equal(photos.status, 200);
@@ -268,6 +290,12 @@ async function main() {
     "album-a-2",
     "album-b-1"
   ]);
+  assert.deepEqual(
+    { width: photos.body.photos[0].width, height: photos.body.photos[0].height },
+    { width: 1200, height: 1800 }
+  );
+  assert.equal(photos.body.photos[2].url, "/file/veil-42");
+  assert.equal(photos.body.photos[2].width, 900);
 
   const likeDb = new FakeD1();
   const likeResponse = await worker.fetch(new Request("https://example.test/api/like", {

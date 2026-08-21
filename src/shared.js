@@ -269,7 +269,7 @@ async function photoPayloadFromOffset(store, offset) {
 }
 
 function photoSummary(album, photo) {
-  return {
+  const summary = {
     id: `${album.id}-${photo.id}`,
     albumId: album.id,
     albumTitle: album.title,
@@ -277,4 +277,11 @@ function photoSummary(album, photo) {
     photoId: photo.id,
     url: photo.url
   };
+  const width = Number(photo.width);
+  const height = Number(photo.height);
+  if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+    summary.width = width;
+    summary.height = height;
+  }
+  return summary;
 }

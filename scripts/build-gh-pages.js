@@ -7,6 +7,9 @@ const rootDir = path.resolve(__dirname, "..");
 const outDir = path.join(rootDir, "dist-gh-pages");
 const repoName = process.env.GITHUB_PAGES_BASE || "xrw-album";
 const basePath = `/${repoName.replace(/^\/+|\/+$/g, "")}`;
+const snapshotDir = process.env.SNAPSHOT_DATA_DIR
+  ? path.resolve(rootDir, process.env.SNAPSHOT_DATA_DIR)
+  : "";
 
 async function copyFile(source, target) {
   await fs.mkdir(path.dirname(target), { recursive: true });
@@ -27,7 +30,37 @@ async function copyDir(source, target) {
   }
 }
 
-async function writePhotoShards() {
+function photoShardKey(id) {
+  if (id.startsWith("veil-")) {
+    const galleryId = Number(id.slice("veil-".length));
+    if (Number.isFinite(galleryId)) return `veil-${Math.floor(galleryId / 1000).toString().padStart(4, "0")}`;
+  }
+  return id.slice(0, 3);
+}
+
+async function loadSnapshotGalleries() {
+  if (!snapshotDir) return [];
+  try {
+    const files = (await fs.readdir(snapshotDir)).filter((file) => file.endsWith(".json")).sort();
+    const galleries = new Map();
+    for (const file of files) {
+      const batch = JSON.parse(await fs.readFile(path.join(snapshotDir, file), "utf8"));
+      if (!Array.isArray(batch.galleries)) throw new Error(`Invalid snapshot batch: ${file}`);
+      for (const gallery of batch.galleries) {
+        if (!gallery?.id || !Array.isArray(gallery.photos) || gallery.photos.length !== gallery.count) {
+          throw new Error(`Invalid snapshot gallery in ${file}: ${gallery?.id || "unknown"}`);
+        }
+        galleries.set(gallery.id, gallery);
+      }
+    }
+    return [...galleries.values()].sort((left, right) => left.source_gallery_id - right.source_gallery_id);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writePhotoShards(snapshotGalleries) {
   const photosDir = path.join(rootDir, "data/photos");
   const shardDir = path.join(outDir, "data/photo-shards");
   const files = await fs.readdir(photosDir);
@@ -36,9 +69,21 @@ async function writePhotoShards() {
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     const id = file.slice(0, -".json".length);
-    const shard = id.slice(0, 3);
+    const shard = photoShardKey(id);
     if (!shards.has(shard)) shards.set(shard, {});
     shards.get(shard)[id] = JSON.parse(await fs.readFile(path.join(photosDir, file), "utf8"));
+  }
+
+  for (const gallery of snapshotGalleries) {
+    const shard = photoShardKey(gallery.id);
+    if (!shards.has(shard)) shards.set(shard, {});
+    shards.get(shard)[gallery.id] = {
+      id: gallery.id,
+      title: gallery.title,
+      count: gallery.count,
+      cover: gallery.cover,
+      photos: gallery.photos
+    };
   }
 
   await fs.mkdir(shardDir, { recursive: true });
@@ -46,9 +91,35 @@ async function writePhotoShards() {
     await fs.writeFile(path.join(shardDir, `${shard}.json`), `${JSON.stringify(details)}\n`);
   }
   return {
-    albumDetailCount: files.filter((file) => file.endsWith(".json")).length,
+    albumDetailCount: [...shards.values()].reduce((count, shard) => count + Object.keys(shard).length, 0),
     shardCount: shards.size
   };
+}
+
+async function writeAlbumsAndManifest(snapshotGalleries) {
+  const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
+  const albums = new Map(baseAlbums.map((album) => [album.id, album]));
+  for (const gallery of snapshotGalleries) {
+    albums.set(gallery.id, {
+      id: gallery.id,
+      title: gallery.title,
+      count: gallery.count,
+      cover: gallery.cover,
+      href: gallery.href || `/album/${gallery.id}`
+    });
+  }
+  const combined = [...albums.values()].map((album, order) => ({ ...album, order }));
+  const baseManifest = JSON.parse(await fs.readFile(path.join(rootDir, "data/manifest.json"), "utf8"));
+  const manifest = {
+    ...baseManifest,
+    builtAt: new Date().toISOString(),
+    albumCount: combined.length,
+    photoCount: combined.reduce((count, album) => count + album.count, 0),
+    maxPhotosPerAlbum: combined.reduce((maximum, album) => Math.max(maximum, album.count), 0),
+    snapshotAlbumCount: snapshotGalleries.length
+  };
+  await fs.writeFile(path.join(outDir, "data/albums.json"), `${JSON.stringify(combined)}\n`);
+  await fs.writeFile(path.join(outDir, "data/manifest.json"), `${JSON.stringify(manifest)}\n`);
 }
 
 function pagesIndex(html) {
@@ -60,8 +131,10 @@ function pagesIndex(html) {
 
   return html
     .replace('href="/favicon.svg?v=1"', `href="${basePath}/favicon.svg?v=1"`)
-    .replace('href="/styles.css?v=20260702-23"', `href="${basePath}/styles.css?v=20260702-23"`)
-    .replace('src="/app.js?v=20260702-23"', `src="${basePath}/app.js?v=20260702-23"`)
+    .replace('href="/lib/fancybox.css?v=20260821-1"', `href="${basePath}/lib/fancybox.css?v=20260821-1"`)
+    .replace('href="/styles.css?v=20260821-1"', `href="${basePath}/styles.css?v=20260821-1"`)
+    .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
+    .replace('src="/app.js?v=20260821-1"', `src="${basePath}/app.js?v=20260821-1"`)
     .replace("    <script>\n      (function () {", `${config}\n    <script>\n      (function () {`);
 }
 
@@ -71,9 +144,9 @@ async function main() {
 
   await copyDir(path.join(rootDir, "public"), outDir);
   await fs.mkdir(path.join(outDir, "data"), { recursive: true });
-  await copyFile(path.join(rootDir, "data/albums.json"), path.join(outDir, "data/albums.json"));
-  await copyFile(path.join(rootDir, "data/manifest.json"), path.join(outDir, "data/manifest.json"));
-  const shardStats = await writePhotoShards();
+  const snapshotGalleries = await loadSnapshotGalleries();
+  await writeAlbumsAndManifest(snapshotGalleries);
+  const shardStats = await writePhotoShards(snapshotGalleries);
 
   const indexPath = path.join(outDir, "index.html");
   const html = await fs.readFile(indexPath, "utf8");
@@ -86,6 +159,7 @@ async function main() {
   console.log(`Base path: ${basePath}`);
   console.log(`Album details: ${shardStats.albumDetailCount}`);
   console.log(`Photo detail shards: ${shardStats.shardCount}`);
+  console.log(`Snapshot albums: ${snapshotGalleries.length}`);
 }
 
 main().catch((error) => {

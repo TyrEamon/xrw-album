@@ -1,6 +1,6 @@
 name = "xrw-album-workers"
 main = "src/worker.js"
-compatibility_date = "2026-07-03"
+compatibility_date = "2026-08-20"
 
 [assets]
 directory = "./public"
@@ -9,5 +9,6 @@ not_found_handling = "single-page-application"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "xrw-album-test"
-database_id = "592deba3-cf95-4f1a-9fe7-faf5e45ffb08"
+database_name = "xrw-album"
+database_id = "8ad3bd59-d501-4397-898a-e895aca1291f"
+migrations_dir = "migrations"

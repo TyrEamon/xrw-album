@@ -26,8 +26,6 @@ let searchPage = 1;
 let searchQuery = "";
 let currentAlbum = null;
 let lightboxIndex = null;
-let touchStart = null;
-let lastTap = 0;
 let detailImageScale = readDetailImageScale();
 let tabs = createTabsState();
 let albumSyncFrame = null;
@@ -297,7 +295,7 @@ async function staticAlbums() {
 
 async function staticAlbumDetail(id) {
   if (!staticData.details.has(id)) {
-    const shardKey = id.slice(0, 3);
+    const shardKey = photoShardKey(id);
     if (!staticData.shards.has(shardKey)) {
       staticData.shards.set(shardKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`));
     }
@@ -306,6 +304,14 @@ async function staticAlbumDetail(id) {
     staticData.details.set(id, detail);
   }
   return staticData.details.get(id);
+}
+
+function photoShardKey(id) {
+  if (id.startsWith("veil-")) {
+    const galleryId = Number(id.slice("veil-".length));
+    if (Number.isFinite(galleryId)) return `veil-${Math.floor(galleryId / 1000).toString().padStart(4, "0")}`;
+  }
+  return id.slice(0, 3);
 }
 
 function withStaticLike(album) {
@@ -570,9 +576,14 @@ function bindThemeButtons(root = document) {
   setTheme(currentTheme());
 }
 
-function lazyImage(src, alt, eager = false) {
+function lazyImage(src, alt, eager = false, size = null) {
   const priority = eager ? "high" : "low";
-  return `<img src="${escapeHtml(src)}" data-src-key="${escapeHtml(src)}" alt="${escapeHtml(alt)}" referrerpolicy="no-referrer" decoding="async" fetchpriority="${priority}" ${eager ? 'loading="eager"' : 'loading="lazy"'}>`;
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  const dimensions = width > 0 && height > 0
+    ? ` width="${Math.round(width)}" height="${Math.round(height)}"`
+    : "";
+  return `<img src="${escapeHtml(src)}" data-src-key="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${dimensions} referrerpolicy="no-referrer" decoding="async" fetchpriority="${priority}" ${eager ? 'loading="eager"' : 'loading="lazy"'}>`;
 }
 
 function markLoadedImages(root = document, onSize) {
@@ -1054,7 +1065,7 @@ function photoItem(photo, index, eager = false) {
       title="${escapeHtml(photo.albumTitle)}"
       style="width:${photo.displayWidth}px;height:${photo.displayHeight}px"
     >
-      ${lazyImage(photo.url, photo.albumTitle, eager)}
+      ${lazyImage(photo.url, photo.albumTitle, eager, photo)}
     </button>
   `;
 }
@@ -1573,7 +1584,7 @@ function detailTemplate(data) {
             <span class="like-icon">${icons.heart}</span>
             <span class="album-like-count">${formatCount(data.likeCount || 0)}</span>
           </button>
-          <span class="detail-like-hint">双击大图也能点赞</span>
+          <span class="detail-like-hint">灯箱中可缩放、全屏和点赞</span>
         </div>
         <label class="detail-size-control">
           <span class="detail-size-label">显示大小</span>
@@ -1686,7 +1697,7 @@ function renderDetailPage(entry, options = {}) {
     const photoIndex = photo.sourceIndex;
     return `
       <button type="button" class="jr-item" data-photo-index="${photoIndex}" style="width:${photo.displayWidth}px;height:${photo.displayHeight}px">
-        ${lazyImage(photo.url, currentAlbum.album.title, entry.page === 1 && index < 6)}
+        ${lazyImage(photo.url, currentAlbum.album.title, entry.page === 1 && index < 6, photo)}
       </button>
     `;
   }).join("");
@@ -1794,7 +1805,11 @@ function rowLayoutRows(photos, width, targetHeight, gap) {
   let ratioSum = 0;
 
   photos.forEach((photo, index) => {
-    const size = imageSizeCache.get(photo.url) || { width: 3, height: 4 };
+    const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
+      ? { width: Number(photo.width), height: Number(photo.height) }
+      : null;
+    if (suppliedSize) rememberImageSize(photo.url, suppliedSize);
+    const size = suppliedSize || imageSizeCache.get(photo.url) || { width: 3, height: 4 };
     const rawRatio = size.width / size.height;
     const ratio = Math.min(2.8, Math.max(0.45, Number.isFinite(rawRatio) ? rawRatio : 0.75));
     row.push({ ...photo, sourceIndex: photo.sourceIndex ?? index, ratio });
@@ -1877,131 +1892,83 @@ async function flushLikes(id) {
 }
 
 function openLightbox(index) {
+  if (!currentAlbum?.photos?.length) return;
   lightboxIndex = index;
-  document.body.style.overflow = "hidden";
-  renderLightbox();
-}
 
-function closeLightbox() {
-  lightboxIndex = null;
-  document.body.style.overflow = "";
-  document.querySelector(".lightbox")?.remove();
-}
-
-function moveLightbox(delta) {
-  if (!currentAlbum || lightboxIndex === null) return;
-  lightboxIndex = Math.min(currentAlbum.photos.length - 1, Math.max(0, lightboxIndex + delta));
-  renderLightbox();
-}
-
-function lightboxTemplate() {
-  const photos = currentAlbum.photos;
-  const photo = photos[lightboxIndex];
-  return `
-    <div class="lightbox" data-lightbox>
-      <div class="lb-header">
-        <span>${String(lightboxIndex + 1).padStart(2, "0")} / ${String(photos.length).padStart(2, "0")}</span>
-        <button type="button" class="lb-close" data-close aria-label="关闭">${icons.close}</button>
-      </div>
-      <div class="lb-stage" data-stage>
-        ${lazyImage(photo.url, currentAlbum.album.title, true).replace("<img", '<img class="lb-img"')}
-        <button type="button" class="lb-nav prev" data-prev aria-label="上一张" ${lightboxIndex === 0 ? "disabled" : ""}>${icons.prev}</button>
-        <button type="button" class="lb-nav next" data-next aria-label="下一张" ${lightboxIndex === photos.length - 1 ? "disabled" : ""}>${icons.next}</button>
-      </div>
-      <div class="lb-footer">
-        <div class="lb-thumbs">
-          ${photos.map((item, index) => `
-            <button type="button" class="lb-thumb ${index === lightboxIndex ? "active" : ""}" data-thumb="${index}" aria-label="第 ${index + 1} 张">
-              <img src="${escapeHtml(item.url)}" alt="" referrerpolicy="no-referrer" loading="lazy">
-            </button>
-          `).join("")}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function renderLightbox() {
-  document.querySelector(".lightbox")?.remove();
-  document.body.insertAdjacentHTML("beforeend", lightboxTemplate());
-  const box = document.querySelector(".lightbox");
-  const stage = box.querySelector("[data-stage]");
-  box.addEventListener("click", closeLightbox);
-  box.querySelector("[data-close]").addEventListener("click", (event) => {
-    event.stopPropagation();
-    closeLightbox();
-  });
-  box.querySelector("[data-prev]").addEventListener("click", (event) => {
-    event.stopPropagation();
-    moveLightbox(-1);
-  });
-  box.querySelector("[data-next]").addEventListener("click", (event) => {
-    event.stopPropagation();
-    moveLightbox(1);
-  });
-  box.querySelectorAll("[data-thumb]").forEach((thumb) => {
-    thumb.addEventListener("click", (event) => {
-      event.stopPropagation();
-      lightboxIndex = Number(thumb.dataset.thumb);
-      renderLightbox();
-    });
-  });
-  stage.addEventListener("click", (event) => event.stopPropagation());
-  stage.addEventListener("dblclick", (event) => {
-    event.stopPropagation();
-    likePhoto(event);
-  });
-  stage.addEventListener("touchstart", (event) => {
-    const touch = event.touches[0];
-    touchStart = { x: touch.clientX, y: touch.clientY };
-  }, { passive: true });
-  stage.addEventListener("touchend", (event) => handleTouch(event), { passive: true });
-  markLoadedImages(box);
-  box.querySelector(".lb-thumb.active")?.scrollIntoView({ inline: "center", block: "nearest" });
-}
-
-function likePhoto(event) {
-  if (!currentAlbum || lightboxIndex === null) return;
-  const photo = currentAlbum.photos[lightboxIndex];
-  const stage = event.currentTarget.getBoundingClientRect();
-  const x = event.clientX - stage.left;
-  const y = event.clientY - stage.top;
-  event.currentTarget.insertAdjacentHTML("beforeend", `
-    <span class="lb-heart" style="left:${x}px;top:${y}px" aria-hidden="true">
-      <svg width="64" height="64" viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-10-9.2C.7 9.1 1.6 5.6 4.7 4.5c2-.7 4 .1 5.1 1.8l.2.3.2-.3c1.1-1.7 3.1-2.5 5.1-1.8 3.1 1.1 4 4.6 2.7 7.3C19.5 16.4 12 21 12 21z" fill="currentColor"></path></svg>
-    </span>
-  `);
-  const heart = event.currentTarget.querySelector(".lb-heart:last-child");
-  heart.addEventListener("animationend", () => heart.remove(), { once: true });
-  queueLike({ photoId: photo.id });
-}
-
-function handleTouch(event) {
-  if (!touchStart) return;
-  const touch = event.changedTouches[0];
-  const dx = touch.clientX - touchStart.x;
-  const dy = touch.clientY - touchStart.y;
-  touchStart = null;
-
-  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-    moveLightbox(dx < 0 ? 1 : -1);
-    lastTap = 0;
+  if (!window.Fancybox?.show) {
+    window.open(currentAlbum.photos[index].url, "_blank", "noopener");
+    lightboxIndex = null;
     return;
   }
 
-  if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-    const now = performance.now();
-    if (now - lastTap < 300) {
-      likePhoto({
-        currentTarget: event.currentTarget,
-        clientX: touch.clientX,
-        clientY: touch.clientY
-      });
-      lastTap = 0;
-    } else {
-      lastTap = now;
-    }
-  }
+  const mobileViewer = window.matchMedia?.("(max-width: 760px)").matches;
+  const slides = currentAlbum.photos.map((photo, photoIndex) => ({
+    src: photo.url,
+    thumbSrc: photo.url,
+    type: "image",
+    alt: currentAlbum.album.title,
+    width: Number(photo.width) || undefined,
+    height: Number(photo.height) || undefined,
+    caption: `${currentAlbum.album.title} · ${photoIndex + 1} / ${currentAlbum.photos.length}`
+  }));
+
+  window.Fancybox.show(slides, {
+    startIndex: index,
+    closeExisting: true,
+    dragToClose: true,
+    Thumbs: { autoStart: !mobileViewer },
+    Toolbar: {
+      display: mobileViewer
+        ? { left: ["counter"], middle: [], right: ["fullscreen", "close"] }
+        : { left: ["counter"], middle: [], right: ["zoom", "slideshow", "fullscreen", "thumbs", "close"] }
+    },
+    Carousel: { infinite: false }
+  });
+
+  installLightboxLike(window.Fancybox.getInstance?.());
+}
+
+function closeLightbox() {
+  window.Fancybox?.getInstance?.()?.close();
+  lightboxIndex = null;
+}
+
+function installLightboxLike(instance) {
+  const container = instance?.getContainer?.();
+  if (!container) return;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "xrw-lightbox-like";
+  button.innerHTML = icons.heart;
+  container.appendChild(button);
+
+  const sync = () => {
+    const index = Number(instance.getCarousel?.()?.getPageIndex?.());
+    if (Number.isFinite(index)) lightboxIndex = index;
+    button.setAttribute("aria-label", `点赞第 ${Number(lightboxIndex) + 1} 张图片`);
+    button.title = "点赞当前图片";
+  };
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    sync();
+    likeLightboxPhoto(button);
+  });
+  instance.on?.("Carousel.change", () => requestAnimationFrame(sync));
+  instance.on?.("destroy", () => {
+    lightboxIndex = null;
+  });
+  sync();
+}
+
+function likeLightboxPhoto(button) {
+  if (!currentAlbum || lightboxIndex === null) return;
+  const photo = currentAlbum.photos[lightboxIndex];
+  button.classList.remove("is-liked");
+  void button.offsetWidth;
+  button.classList.add("is-liked");
+  queueLike({ photoId: photo.id });
 }
 
 function navigate(path) {
@@ -2028,12 +1995,6 @@ async function route() {
 window.addEventListener("popstate", () => route().catch(errorPanel));
 window.addEventListener("scroll", onHomeScroll, { passive: true });
 window.addEventListener("resize", renderHomePhotoGridOnResize, { passive: true });
-window.addEventListener("keydown", (event) => {
-  if (lightboxIndex === null) return;
-  if (event.key === "Escape") closeLightbox();
-  if (event.key === "ArrowLeft") moveLightbox(-1);
-  if (event.key === "ArrowRight") moveLightbox(1);
-});
 window.addEventListener("pagehide", () => {
   for (const id of pendingLikes.keys()) flushLikes(id);
 });

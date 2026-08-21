@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+snapshot_root="${SNAPSHOT_REPO_DIR:-/var/lib/xrw-publisher/github-snapshot}"
+snapshot_branch="${SNAPSHOT_BRANCH:-snapshot}"
+publisher_bin="${PUBLISHER_BIN:-/opt/xrw-publisher/xrw-publisher}"
+
+if [[ ! -d "${snapshot_root}/.git" ]]; then
+  echo "snapshot repository is not initialized: ${snapshot_root}" >&2
+  exit 1
+fi
+
+cd "${snapshot_root}"
+if [[ "$(git branch --show-current)" != "${snapshot_branch}" ]]; then
+  echo "snapshot repository is not on ${snapshot_branch}" >&2
+  exit 1
+fi
+
+"${publisher_bin}" snapshot -out "${snapshot_root}/batches" -max 1000
+git add -- batches
+if ! git diff --cached --quiet; then
+  git -c user.name="xrw-publisher" -c user.email="xrw-publisher@users.noreply.github.com" \
+    commit -m "Update gallery snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+fi
+git push origin "${snapshot_branch}"

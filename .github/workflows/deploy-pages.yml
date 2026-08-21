@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: "17 */3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,8 +21,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out website
         uses: actions/checkout@v6
+        with:
+          path: site
+
+      - name: Check out VPS snapshots
+        uses: actions/checkout@v6
+        with:
+          ref: snapshot
+          path: snapshot-data
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -28,9 +38,11 @@ jobs:
           node-version: 22
 
       - name: Build static gallery
+        working-directory: site
         run: npm run build:gh-pages
         env:
           GITHUB_PAGES_BASE: xrw-album
+          SNAPSHOT_DATA_DIR: ../snapshot-data/batches
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -40,7 +52,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: dist-gh-pages
+          path: site/dist-gh-pages
 
   deploy:
     environment:
