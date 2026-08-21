@@ -1760,6 +1760,7 @@ async function appendSearch() {
 
 function detailTemplate(data) {
   const album = data.album;
+  const bannerImage = data.photos[0]?.url || album.cover || "";
   return `
     <main class="detail page-enter">
       <div class="detail-top">
@@ -1772,27 +1773,32 @@ function detailTemplate(data) {
           ${themeButton()}
         </div>
       </div>
-      <h1 class="detail-title">${escapeHtml(album.title)}</h1>
-      <div class="detail-like-row">
-        <div class="detail-like-group">
-          <button type="button" class="album-like" data-like-album>
-            <span class="like-icon">${icons.heart}</span>
-            <span class="album-like-count">${formatCount(data.likeCount || 0)}</span>
-          </button>
-          <span class="detail-like-hint">灯箱中可缩放、全屏和点赞</span>
-        </div>
-        <div class="detail-view-controls">
-          <div class="detail-view-switch" role="group" aria-label="图片排列方式">
-            <button type="button" class="detail-view-button ${detailViewMode === "gallery" ? "active" : ""}" data-view-mode="gallery" aria-pressed="${detailViewMode === "gallery"}">图册</button>
-            <button type="button" class="detail-view-button ${detailViewMode === "single" ? "active" : ""}" data-view-mode="single" aria-pressed="${detailViewMode === "single"}">单图</button>
+      <section class="detail-banner">
+        ${bannerImage ? `<img class="detail-banner-image" src="${escapeHtml(bannerImage)}" alt="" aria-hidden="true" decoding="async" fetchpriority="high">` : ""}
+        <div class="detail-banner-content">
+          <h1 class="detail-title">${escapeHtml(album.title)}</h1>
+          <div class="detail-like-row">
+            <div class="detail-like-group">
+              <button type="button" class="album-like" data-like-album>
+                <span class="like-icon">${icons.heart}</span>
+                <span class="album-like-count">${formatCount(data.likeCount || 0)}</span>
+              </button>
+              <span class="detail-like-hint">灯箱中可缩放、全屏和点赞</span>
+            </div>
+            <div class="detail-view-controls">
+              <div class="detail-view-switch" role="group" aria-label="图片排列方式">
+                <button type="button" class="detail-view-button ${detailViewMode === "gallery" ? "active" : ""}" data-view-mode="gallery" aria-pressed="${detailViewMode === "gallery"}">图册</button>
+                <button type="button" class="detail-view-button ${detailViewMode === "single" ? "active" : ""}" data-view-mode="single" aria-pressed="${detailViewMode === "single"}">单图</button>
+              </div>
+              <label class="detail-size-control ${detailViewMode === "single" ? "is-hidden" : ""}" data-size-control>
+                <span class="detail-size-label">显示大小</span>
+                <input type="range" min="100" max="300" step="10" value="${detailImageScale}" data-size-slider aria-label="调整图片显示大小">
+                <span class="detail-size-value" data-size-value>${detailImageScale}%</span>
+              </label>
+            </div>
           </div>
-          <label class="detail-size-control ${detailViewMode === "single" ? "is-hidden" : ""}" data-size-control>
-            <span class="detail-size-label">显示大小</span>
-            <input type="range" min="100" max="300" step="10" value="${detailImageScale}" data-size-slider aria-label="调整图片显示大小">
-            <span class="detail-size-value" data-size-value>${detailImageScale}%</span>
-          </label>
         </div>
-      </div>
+      </section>
       <div class="justified-rows" data-rows></div>
       ${backToTopButton()}
     </main>

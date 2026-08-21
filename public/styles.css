@@ -917,6 +917,92 @@ img {
   overflow-wrap: anywhere;
 }
 
+.detail-banner {
+  position: relative;
+  isolation: isolate;
+  min-height: clamp(320px, 34vw, 460px);
+  margin: 0 calc(var(--gutter) * -1) clamp(40px, 5vw, 64px);
+  padding: clamp(48px, 7vw, 96px) var(--gutter) clamp(36px, 5vw, 64px);
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  background: #211c19;
+}
+
+.detail-banner::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(13, 10, 9, 0.24) 0%, rgba(13, 10, 9, 0.48) 48%, rgba(13, 10, 9, 0.88) 100%);
+}
+
+.detail-banner-image {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 32%;
+  filter: saturate(0.88) contrast(1.02);
+}
+
+.detail-banner-content {
+  min-width: 0;
+  width: 100%;
+  align-self: flex-end;
+}
+
+.detail-banner .detail-title {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 0 clamp(28px, 4vw, 48px);
+  color: #fffaf5;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.42);
+}
+
+.detail-banner .detail-like-row {
+  margin: 0;
+}
+
+.detail-banner .album-like {
+  border-color: rgba(255, 255, 255, 0.38);
+  color: #ffd3ad;
+  background: rgba(20, 16, 14, 0.5);
+  backdrop-filter: blur(10px);
+}
+
+.detail-banner .album-like:hover {
+  border-color: rgba(255, 211, 173, 0.88);
+  background: rgba(20, 16, 14, 0.72);
+}
+
+.detail-banner .detail-like-hint {
+  color: rgba(255, 250, 245, 0.76);
+}
+
+.detail-banner .detail-view-switch,
+.detail-banner .detail-size-control {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(20, 16, 14, 0.62);
+  color: rgba(255, 250, 245, 0.84);
+  backdrop-filter: blur(10px);
+}
+
+.detail-banner .detail-view-button {
+  color: rgba(255, 250, 245, 0.7);
+}
+
+.detail-banner .detail-view-button:hover,
+.detail-banner .detail-view-button:focus-visible {
+  color: #fffaf5;
+}
+
+.detail-banner .detail-size-value {
+  color: #ffd3ad;
+}
+
 .detail-like-row {
   display: flex;
   flex-wrap: wrap;
@@ -1462,6 +1548,21 @@ img {
 
   .detail-top {
     align-items: flex-start;
+  }
+
+  .detail-banner {
+    min-height: 440px;
+    padding-top: 44px;
+    padding-bottom: 32px;
+  }
+
+  .detail-banner-image {
+    object-position: center 24%;
+  }
+
+  .detail-banner .detail-title {
+    font-size: clamp(30px, 10vw, 48px);
+    word-break: break-all;
   }
 
   .detail-counter {
