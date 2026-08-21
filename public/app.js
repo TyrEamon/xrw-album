@@ -678,6 +678,9 @@ function albumCard(album, index, eager = index < 8) {
 }
 
 function headerTemplate(manifest) {
+  const hasAlbumCount = manifest.albumCount !== null
+    && manifest.albumCount !== undefined
+    && Number.isFinite(Number(manifest.albumCount));
   return `
     <header class="home-header">
       <div class="brand" aria-label="绮影志 VELVET ARCHIVE">
@@ -690,7 +693,7 @@ function headerTemplate(manifest) {
         <input class="search-input" name="q" type="search" placeholder="搜索图集" value="${escapeHtml(searchQuery)}" autocomplete="off">
       </label>
       <div class="header-actions">
-        <span class="archive-count">${formatCount(manifest.albumCount)} Sets</span>
+        <span class="archive-count">${hasAlbumCount ? formatCount(manifest.albumCount) : "--"} Sets</span>
         ${themeButton()}
       </div>
     </header>
@@ -698,23 +701,61 @@ function headerTemplate(manifest) {
 }
 
 function heroStat(en, cn, value) {
+  const hasValue = value !== null && value !== undefined && Number.isFinite(Number(value));
+  const target = hasValue ? Math.max(0, Number(value)) : 0;
   return `
     <div class="hero-stat" role="listitem">
       <span class="hero-stat-en">${en}</span>
       <span class="hero-stat-cn">${cn}</span>
-      <span class="hero-stat-num">${formatCount(value)}</span>
+      <span class="hero-stat-num"${hasValue ? ` data-count-up="${target}" aria-label="${formatCount(target)}"` : ""} aria-live="off">--</span>
     </div>
   `;
 }
 
+function animateHeroStats(root) {
+  const counters = root.querySelectorAll("[data-count-up]");
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+  counters.forEach((counter) => {
+    const target = Number(counter.dataset.countUp);
+    const finish = () => {
+      counter.textContent = formatCount(target);
+      counter.classList.remove("is-counting");
+      counter.classList.add("is-counted");
+    };
+
+    if (!Number.isFinite(target) || reduceMotion) {
+      finish();
+      return;
+    }
+
+    const duration = 800;
+    requestAnimationFrame(() => {
+      requestAnimationFrame((startedAt) => {
+        counter.classList.add("is-counting");
+        const tick = (now) => {
+          if (!counter.isConnected) return;
+          const progress = Math.min((now - startedAt) / duration, 1);
+          const eased = 1 - Math.pow(1 - progress, 4);
+          counter.textContent = formatCount(Math.round(target * eased));
+          if (progress < 1) requestAnimationFrame(tick);
+          else finish();
+        };
+        requestAnimationFrame(tick);
+      });
+    });
+  });
+}
+
 function heroTemplate(manifest) {
-  const tagCount = Number(manifest.tagCount) || 0;
+  const tagPending = manifest.tagCount === null || manifest.tagCount === undefined;
+  const tagCount = tagPending ? null : Number(manifest.tagCount) || 0;
   return `
     <section class="home-hero" aria-label="档案概览">
       <div class="hero-stats" role="list">
         ${heroStat("Collections", "图集", manifest.albumCount)}
         ${heroStat("Photos", "照片", manifest.photoCount)}
-        ${tagCount ? heroStat("Tags", "标签", tagCount) : ""}
+        ${tagPending || tagCount ? heroStat("Tags", "标签", tagCount) : ""}
       </div>
       <div class="hero-brand">
         <h2 class="hero-velvet">Velvet</h2>
@@ -824,6 +865,23 @@ function homeTemplate(data) {
   `;
 }
 
+function pendingHomeTemplate() {
+  const pendingManifest = { albumCount: null, photoCount: null, tagCount: null };
+  return `
+    <div class="page-enter" aria-busy="true">
+      ${headerTemplate(pendingManifest)}
+      ${heroTemplate(pendingManifest)}
+      <main class="home-body">
+        <div class="detail-loading">
+          <span class="detail-loading-dot"></span>
+          <span class="detail-loading-dot"></span>
+          <span class="detail-loading-dot"></span>
+        </div>
+      </main>
+    </div>
+  `;
+}
+
 function backToTopButton() {
   return `<button type="button" class="back-to-top" data-back-to-top aria-label="回到顶部" title="回到顶部">${icons.up}</button>`;
 }
@@ -876,8 +934,9 @@ function errorPanel(error) {
 }
 
 async function renderHome() {
-  loading();
   if (!homeManifest) {
+    app.innerHTML = pendingHomeTemplate();
+    bindThemeButtons(app);
     const health = await getJson("/api/health");
     homeManifest = {
       albumCount: health.albumCount,
@@ -890,6 +949,7 @@ async function renderHome() {
   tabs.recent.total ||= homeManifest.albumCount;
   tabs.random.total ||= homeManifest.albumCount;
   app.innerHTML = homeTemplate({ manifest: homeManifest });
+  animateHeroStats(app);
   bindThemeButtons(app);
   bindBackToTop();
   bindHomeControls();

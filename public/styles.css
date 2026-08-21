@@ -305,6 +305,19 @@ img {
   letter-spacing: -0.01em;
 }
 
+.hero-stat-num[data-count-up] {
+  min-width: 7ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.42;
+  transition: opacity 180ms ease;
+}
+
+.hero-stat-num.is-counting,
+.hero-stat-num.is-counted {
+  opacity: 1;
+}
+
 .hero-stat:nth-child(2) .hero-stat-num {
   font-size: clamp(33px, 3.8vw, 46px);
 }
