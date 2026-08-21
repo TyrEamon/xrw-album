@@ -135,17 +135,20 @@ function createTabsState() {
   };
 }
 
+// Lucide Icons v1.33.0, ISC License. Only the icons used by this page are embedded.
+function lucideIcon(name, paths) {
+  return `<svg class="lucide lucide-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
+
 const icons = {
-  moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 14.2A8 8 0 0 1 9.8 4a6.5 6.5 0 1 0 10.2 10.2z" stroke-linejoin="round"></path></svg>',
-  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>',
-  search: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8.8" cy="8.8" r="5.6"></circle><path d="m13 13 4 4"></path></svg>',
-  refresh: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M14 8a6 6 0 1 1-1.76-4.24" stroke-linecap="round"></path><path d="M14 2v3.5h-3.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
-  arrow: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 11L11 3M11 3H5M11 3V9" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
-  back: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 2L3 7L9 12" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
-  close: '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 2L12 12M12 2L2 12" stroke-linecap="round"></path></svg>',
-  prev: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 2L4 8L10 14" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
-  next: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 2L12 8L6 14" stroke-linecap="round" stroke-linejoin="round"></path></svg>',
-  heart: '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-10-9.2C.7 9.1 1.6 5.6 4.7 4.5c2-.7 4 .1 5.1 1.8l.2.3.2-.3c1.1-1.7 3.1-2.5 5.1-1.8 3.1 1.1 4 4.6 2.7 7.3C19.5 16.4 12 21 12 21z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>'
+  moon: lucideIcon("moon", '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/>'),
+  sun: lucideIcon("sun", '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'),
+  search: lucideIcon("search", '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>'),
+  refresh: lucideIcon("refresh-cw", '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/>'),
+  arrow: lucideIcon("arrow-up-right", '<path d="M7 7h10v10M7 17 17 7"/>'),
+  back: lucideIcon("chevron-left", '<path d="m15 18-6-6 6-6"/>'),
+  heart: lucideIcon("heart", '<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>'),
+  up: lucideIcon("arrow-up", '<path d="m5 12 7-7 7 7M12 19V5"/>')
 };
 
 function escapeHtml(value) {
@@ -311,7 +314,7 @@ async function staticAlbumDetail(id) {
 function photoShardKey(id) {
   if (id.startsWith("veil-")) {
     const galleryId = Number(id.slice("veil-".length));
-    if (Number.isFinite(galleryId)) return `veil-${Math.floor(galleryId / 1000).toString().padStart(4, "0")}`;
+    if (Number.isFinite(galleryId)) return `veil-${Math.floor(galleryId / 25).toString().padStart(5, "0")}`;
   }
   return id.slice(0, 3);
 }
@@ -447,7 +450,9 @@ async function staticPhotoFromOffset(offset, mode = "sequence", seedValue = "pho
     albumTitle: entry.album.title,
     albumHref: entry.album.href,
     photoId: photo.id,
-    url: normalizeImageUrl(photo.url)
+    url: normalizeImageUrl(photo.url),
+    width: Number(photo.width) || undefined,
+    height: Number(photo.height) || undefined
   };
 }
 
@@ -542,9 +547,9 @@ function setDetailImageScale(value) {
 
 function readDetailViewMode() {
   try {
-    return localStorage.getItem(DETAIL_VIEW_KEY) === "single" ? "single" : "gallery";
+    return localStorage.getItem(DETAIL_VIEW_KEY) === "gallery" ? "gallery" : "single";
   } catch {
-    return "gallery";
+    return "single";
   }
 }
 
@@ -764,8 +769,24 @@ function homeTemplate(data) {
           </section>
         </div>
       </main>
+      ${backToTopButton()}
     </div>
   `;
+}
+
+function backToTopButton() {
+  return `<button type="button" class="back-to-top" data-back-to-top aria-label="回到顶部" title="回到顶部">${icons.up}</button>`;
+}
+
+function bindBackToTop() {
+  app.querySelector("[data-back-to-top]")?.addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  syncBackToTop();
+}
+
+function syncBackToTop() {
+  app.querySelector("[data-back-to-top]")?.classList.toggle("is-visible", window.scrollY > Math.max(500, window.innerHeight * 0.75));
 }
 
 function bindAlbumCards(root = document) {
@@ -790,14 +811,18 @@ function loading() {
 }
 
 function errorPanel(error) {
+  const isHome = appPathname() === "/";
   app.innerHTML = `
     <div class="error-panel">
       <h1>加载失败</h1>
-      <p>${escapeHtml(error.message || error)}</p>
-      <button class="more-btn" type="button" data-back>返回</button>
+      <p>${escapeHtml(error.message === "Failed to fetch" ? "网络请求中断，请重试" : error.message || error)}</p>
+      <button class="more-btn" type="button" data-back>${isHome ? "重新加载" : "返回"}</button>
     </div>
   `;
-  app.querySelector("[data-back]").addEventListener("click", () => navigate("/"));
+  app.querySelector("[data-back]").addEventListener("click", () => {
+    if (isHome) route().catch(errorPanel);
+    else navigate("/");
+  });
 }
 
 async function renderHome() {
@@ -815,6 +840,7 @@ async function renderHome() {
   tabs.random.total ||= homeManifest.albumCount;
   app.innerHTML = homeTemplate({ manifest: homeManifest });
   bindThemeButtons(app);
+  bindBackToTop();
   bindHomeControls();
   if (searchQuery) {
     await runSearch(1);
@@ -1618,6 +1644,7 @@ function detailTemplate(data) {
         </div>
       </div>
       <div class="justified-rows" data-rows></div>
+      ${backToTopButton()}
     </main>
   `;
 }
@@ -1632,6 +1659,7 @@ async function renderAlbum(id) {
   };
   app.innerHTML = detailTemplate(data);
   bindThemeButtons(app);
+  bindBackToTop();
   app.querySelector("[data-back]").addEventListener("click", () => {
     if (history.length > 1) history.back();
     else navigate("/");
@@ -2062,6 +2090,7 @@ async function route() {
 
 window.addEventListener("popstate", () => route().catch(errorPanel));
 window.addEventListener("scroll", onHomeScroll, { passive: true });
+window.addEventListener("scroll", syncBackToTop, { passive: true });
 window.addEventListener("resize", renderHomePhotoGridOnResize, { passive: true });
 window.addEventListener("pagehide", () => {
   for (const id of pendingLikes.keys()) flushLikes(id);
