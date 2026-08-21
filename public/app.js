@@ -7,6 +7,7 @@ const PHOTO_PAGE_SIZE = 72;
 const PHOTO_ROWS_PER_PAGE = 8;
 const DETAIL_ROWS_PER_PAGE = 8;
 const DETAIL_SIZE_KEY = "xrw-album-detail-size";
+const DETAIL_VIEW_KEY = "xrw-album-detail-view";
 const PREFETCH_DELAY = 120;
 const ALBUM_PAGE_RENDER_MARGIN = 900;
 const PHOTO_PAGE_RENDER_MARGIN = 650;
@@ -27,6 +28,7 @@ let searchQuery = "";
 let currentAlbum = null;
 let lightboxIndex = null;
 let detailImageScale = readDetailImageScale();
+let detailViewMode = readDetailViewMode();
 let tabs = createTabsState();
 let albumSyncFrame = null;
 let photoSyncFrame = null;
@@ -535,6 +537,23 @@ function setDetailImageScale(value) {
     localStorage.setItem(DETAIL_SIZE_KEY, String(detailImageScale));
   } catch {
     // Storage can be blocked in private or restricted browser contexts.
+  }
+}
+
+function readDetailViewMode() {
+  try {
+    return localStorage.getItem(DETAIL_VIEW_KEY) === "single" ? "single" : "gallery";
+  } catch {
+    return "gallery";
+  }
+}
+
+function setDetailViewMode(value) {
+  detailViewMode = value === "single" ? "single" : "gallery";
+  try {
+    localStorage.setItem(DETAIL_VIEW_KEY, detailViewMode);
+  } catch {
+    // The selected mode still applies for the current page when storage is unavailable.
   }
 }
 
@@ -1586,11 +1605,17 @@ function detailTemplate(data) {
           </button>
           <span class="detail-like-hint">灯箱中可缩放、全屏和点赞</span>
         </div>
-        <label class="detail-size-control">
-          <span class="detail-size-label">显示大小</span>
-          <input type="range" min="100" max="300" step="10" value="${detailImageScale}" data-size-slider aria-label="调整图片显示大小">
-          <span class="detail-size-value" data-size-value>${detailImageScale}%</span>
-        </label>
+        <div class="detail-view-controls">
+          <div class="detail-view-switch" role="group" aria-label="图片排列方式">
+            <button type="button" class="detail-view-button ${detailViewMode === "gallery" ? "active" : ""}" data-view-mode="gallery" aria-pressed="${detailViewMode === "gallery"}">图册</button>
+            <button type="button" class="detail-view-button ${detailViewMode === "single" ? "active" : ""}" data-view-mode="single" aria-pressed="${detailViewMode === "single"}">单图</button>
+          </div>
+          <label class="detail-size-control ${detailViewMode === "single" ? "is-hidden" : ""}" data-size-control>
+            <span class="detail-size-label">显示大小</span>
+            <input type="range" min="100" max="300" step="10" value="${detailImageScale}" data-size-slider aria-label="调整图片显示大小">
+            <span class="detail-size-value" data-size-value>${detailImageScale}%</span>
+          </label>
+        </div>
       </div>
       <div class="justified-rows" data-rows></div>
     </main>
@@ -1620,25 +1645,45 @@ async function renderAlbum(id) {
 function bindDetailControls() {
   const slider = app.querySelector("[data-size-slider]");
   const value = app.querySelector("[data-size-value]");
-  if (!slider || !value) return;
+  if (slider && value) {
+    slider.addEventListener("input", () => {
+      setDetailImageScale(slider.value);
+      value.textContent = `${detailImageScale}%`;
+      renderDetailRows({ force: true });
+    });
+  }
 
-  slider.addEventListener("input", () => {
-    setDetailImageScale(slider.value);
-    value.textContent = `${detailImageScale}%`;
-    renderDetailRows({ force: true });
+  app.querySelectorAll("[data-view-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.viewMode === "single" ? "single" : "gallery";
+      if (nextMode === detailViewMode) return;
+      setDetailViewMode(nextMode);
+      syncDetailViewControls();
+      currentAlbum.detailLayoutKey = "";
+      renderDetailRows({ force: true });
+    });
   });
+}
+
+function syncDetailViewControls() {
+  app.querySelectorAll("[data-view-mode]").forEach((button) => {
+    const active = button.dataset.viewMode === detailViewMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  app.querySelector("[data-size-control]")?.classList.toggle("is-hidden", detailViewMode === "single");
 }
 
 function detailLayoutConfig(container) {
   const width = container?.clientWidth || Math.max(320, window.innerWidth - 32);
   const baseHeight = width < 600 ? 160 : width < 1000 ? 220 : 280;
   const targetHeight = Math.round(baseHeight * detailImageScale / 100);
-  const gap = width < 600 ? 5 : 8;
+  const gap = detailViewMode === "single" ? (width < 600 ? 12 : 20) : (width < 600 ? 5 : 8);
   return {
     width,
     targetHeight,
     gap,
-    key: `${Math.round(width)}:${targetHeight}:${gap}`
+    key: `${detailViewMode}:${Math.round(width)}:${targetHeight}:${gap}`
   };
 }
 
@@ -1647,7 +1692,9 @@ function createDetailPages(photos, config, previousPages = []) {
     ...photo,
     sourceIndex: index
   }));
-  const rows = rowLayoutRows(indexedPhotos, config.width, config.targetHeight, config.gap);
+  const rows = detailViewMode === "single"
+    ? singlePhotoRows(indexedPhotos, config.width)
+    : rowLayoutRows(indexedPhotos, config.width, config.targetHeight, config.gap);
   const pages = [];
   for (let index = 0; index < rows.length; index += DETAIL_ROWS_PER_PAGE) {
     const pageNumber = pages.length + 1;
@@ -1655,6 +1702,7 @@ function createDetailPages(photos, config, previousPages = []) {
     pages.push({
       page: pageNumber,
       rows: rows.slice(index, index + DETAIL_ROWS_PER_PAGE),
+      gap: config.gap,
       height: previous?.height || 0,
       rendered: false,
       layoutTimer: null
@@ -1675,8 +1723,7 @@ function detailPageNearViewport(element) {
 }
 
 function estimateDetailPageHeight(entry) {
-  const container = app.querySelector("[data-rows]");
-  const { gap } = detailLayoutConfig(container);
+  const gap = entry.gap ?? 8;
   return entry.rows.reduce((height, row, index) => {
     const rowHeight = row[0]?.displayHeight || 0;
     return height + rowHeight + (index ? gap : 0);
@@ -1693,6 +1740,7 @@ function renderDetailPage(entry, options = {}) {
   const items = entry.rows.flat();
   page.classList.remove("is-placeholder");
   page.style.minHeight = "";
+  page.style.gap = `${entry.gap ?? 8}px`;
   page.innerHTML = items.map((photo, index) => {
     const photoIndex = photo.sourceIndex;
     return `
@@ -1778,12 +1826,13 @@ function renderDetailRows(options = {}) {
   if (config.width < 100) return;
 
   if (options.force || currentAlbum.detailLayoutKey !== config.key || !currentAlbum.detailPages?.length) {
-    currentAlbum.detailPages = createDetailPages(currentAlbum.photos, config, currentAlbum.detailPages || []);
+    const previousPages = currentAlbum.detailLayoutKey === config.key ? currentAlbum.detailPages || [] : [];
+    currentAlbum.detailPages = createDetailPages(currentAlbum.photos, config, previousPages);
     currentAlbum.detailLayoutKey = config.key;
   }
 
   const pages = currentAlbum.detailPages;
-  container.className = "justified-rows detail-photo-pages";
+  container.className = `justified-rows detail-photo-pages ${detailViewMode === "single" ? "is-single" : "is-gallery"}`;
   const signature = `${currentAlbum.album.id}:${currentAlbum.detailLayoutKey}:${pages.length}`;
   if (options.force || container.dataset.detailPages !== signature) {
     container.dataset.detailPages = signature;
@@ -1796,6 +1845,25 @@ function renderDetailRowsOnResize() {
   if (!currentAlbum || !appPathname().startsWith("/album/")) return;
   clearTimeout(detailResizeTimer);
   detailResizeTimer = setTimeout(() => renderDetailRows({ force: true }), 120);
+}
+
+function singlePhotoRows(photos, containerWidth) {
+  const displayWidth = Math.min(containerWidth, 980);
+  return photos.map((photo, index) => {
+    const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
+      ? { width: Number(photo.width), height: Number(photo.height) }
+      : null;
+    if (suppliedSize) rememberImageSize(photo.url, suppliedSize);
+    const size = suppliedSize || imageSizeCache.get(photo.url) || { width: 3, height: 4 };
+    const rawRatio = size.width / size.height;
+    const ratio = Number.isFinite(rawRatio) && rawRatio > 0 ? rawRatio : 0.75;
+    return [{
+      ...photo,
+      sourceIndex: photo.sourceIndex ?? index,
+      displayWidth,
+      displayHeight: displayWidth / ratio
+    }];
+  });
 }
 
 function rowLayoutRows(photos, width, targetHeight, gap) {

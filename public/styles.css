@@ -738,6 +738,7 @@ img {
 
 .detail-like-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
@@ -791,6 +792,51 @@ img {
   letter-spacing: 0.08em;
 }
 
+.detail-view-controls {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.detail-view-switch {
+  flex: 0 0 auto;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(54px, 1fr));
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #050505;
+}
+
+.detail-view-button {
+  min-height: 30px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  transition: color 0.18s, background 0.18s;
+}
+
+.detail-view-button:hover,
+.detail-view-button:focus-visible {
+  color: var(--ink);
+}
+
+.detail-view-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.detail-view-button.active {
+  background: var(--accent);
+  color: #18120a;
+}
+
 .detail-size-control {
   width: min(100%, 360px);
   min-height: 38px;
@@ -804,6 +850,10 @@ img {
   border-radius: 999px;
   background: #050505;
   color: var(--ink-2);
+}
+
+.detail-size-control.is-hidden {
+  display: none;
 }
 
 .detail-size-label,
@@ -875,6 +925,20 @@ img {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.detail-photo-pages.is-single .detail-photo-page {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
+}
+
+.detail-photo-pages.is-single .jr-item {
+  border-radius: 10px;
+}
+
+.detail-photo-pages.is-single .jr-item img {
+  object-fit: contain;
 }
 
 .photo-page,
@@ -1145,6 +1209,21 @@ img {
   .detail-like-group {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .detail-view-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .detail-view-switch {
+    width: 100%;
+    border-radius: 4px;
+  }
+
+  .detail-view-button {
+    border-radius: 2px;
   }
 
   .detail-size-control {
