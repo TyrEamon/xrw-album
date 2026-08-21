@@ -45,6 +45,20 @@ const searchIndex = albums.map((album) => ({
   album,
   text: album.title.toLocaleLowerCase()
 }));
+const localTagMap = new Map();
+for (const album of albums) {
+  const seen = new Set();
+  for (const value of Array.isArray(album.tags) ? album.tags : []) {
+    const name = String(value || "").trim();
+    const key = name.toLocaleLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    const current = localTagMap.get(key);
+    if (current) current.count += 1;
+    else localTagMap.set(key, { name, count: 1 });
+  }
+}
+const localTags = [...localTagMap.entries()].map(([key, tag]) => ({ ...tag, key }));
 
 let likes = { albums: {}, photos: {} };
 const likesFile = path.join(dataDir, "likes.json");
@@ -351,12 +365,45 @@ async function readBody(req, limit = 128 * 1024) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function tagMatchesGroup(name, group) {
+  const first = String(name || "").trim().charAt(0).toLocaleUpperCase();
+  if (!group) return true;
+  if (group === "0-9") return /^[0-9]$/.test(first);
+  if (group === "other") return !/^[A-Z0-9]$/.test(first);
+  return first === group;
+}
+
+function tagsPayload(url) {
+  const query = (url.searchParams.get("q") || "").trim().toLocaleLowerCase();
+  const requestedGroup = (url.searchParams.get("group") || "").trim().toLocaleUpperCase();
+  const group = requestedGroup === "0-9" || requestedGroup === "OTHER"
+    ? requestedGroup.toLocaleLowerCase()
+    : /^[A-Z]$/.test(requestedGroup) ? requestedGroup : "";
+  const sort = url.searchParams.get("sort") === "name" ? "name" : "count";
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1));
+  const limit = Math.min(600, Math.max(50, Number(url.searchParams.get("limit") || 300)));
+  const filtered = localTags.filter((tag) => (!query || tag.key.includes(query)) && tagMatchesGroup(tag.name, group));
+  filtered.sort(sort === "name"
+    ? (left, right) => left.name.localeCompare(right.name)
+    : (left, right) => right.count - left.count || left.name.localeCompare(right.name));
+  const offset = (page - 1) * limit;
+
+  return {
+    ok: true,
+    page,
+    limit,
+    total: filtered.length,
+    tags: filtered.slice(offset, offset + limit).map(({ name, count }) => ({ name, count }))
+  };
+}
+
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/health") {
     json(res, 200, {
       ok: true,
       albumCount: manifest.albumCount,
       photoCount: manifest.photoCount,
+      tagCount: localTags.length || Number(manifest.tagCount) || 0,
       builtAt: manifest.builtAt
     });
     return;
@@ -369,6 +416,11 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/albums") {
     json(res, 200, albumsPayload(url));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/tags") {
+    json(res, 200, tagsPayload(url));
     return;
   }
 

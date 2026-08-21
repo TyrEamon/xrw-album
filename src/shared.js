@@ -117,6 +117,7 @@ export async function healthPayload(store) {
     ok: true,
     albumCount: manifest.albumCount,
     photoCount: manifest.photoCount,
+    tagCount: Number(manifest.tagCount) || 0,
     builtAt: manifest.builtAt
   };
 }
@@ -165,6 +166,26 @@ export async function albumsPayload(store, url) {
     limit,
     total: result.total,
     albums: result.albums.map(withLike)
+  };
+}
+
+export async function tagsPayload(store, url) {
+  const query = (url.searchParams.get("q") || "").trim().toLocaleLowerCase();
+  const requestedGroup = (url.searchParams.get("group") || "").trim().toLocaleUpperCase();
+  const group = requestedGroup === "0-9" || requestedGroup === "OTHER"
+    ? requestedGroup.toLocaleLowerCase()
+    : /^[A-Z]$/.test(requestedGroup) ? requestedGroup : "";
+  const sort = url.searchParams.get("sort") === "name" ? "name" : "count";
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1));
+  const limit = Math.min(600, Math.max(50, Number(url.searchParams.get("limit") || 300)));
+  const result = await store.tags({ query, group, sort, page, limit });
+
+  return {
+    ok: true,
+    page,
+    limit,
+    total: result.total,
+    tags: result.tags
   };
 }
 

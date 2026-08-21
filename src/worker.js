@@ -7,7 +7,8 @@ import {
   likePayload,
   notFound,
   photosPayload,
-  seedFrom
+  seedFrom,
+  tagsPayload
 } from "./shared.js";
 
 const MAX_ADMIN_BODY_BYTES = 2 * 1024 * 1024;
@@ -31,7 +32,14 @@ class D1Store {
   async manifest() {
     if (this.manifestCache) return this.manifestCache;
     const row = await this.db.prepare("SELECT value FROM meta WHERE key = 'manifest'").first();
-    this.manifestCache = JSON.parse(row?.value || "{}");
+    const manifest = JSON.parse(row?.value || "{}");
+    try {
+      const tagRow = await this.db.prepare("SELECT COUNT(*) AS total FROM tags").first();
+      manifest.tagCount = Number(tagRow?.total || 0);
+    } catch {
+      manifest.tagCount = Number(manifest.tagCount) || 0;
+    }
+    this.manifestCache = manifest;
     return this.manifestCache;
   }
 
@@ -125,6 +133,52 @@ class D1Store {
     return (rows.results || []).map((row) => row.name).filter(Boolean);
   }
 
+  async tags({ query = "", group = "", sort = "count", page = 1, limit = 300 }) {
+    const conditions = [];
+    const params = [];
+    if (query) {
+      conditions.push("name_lc LIKE ?");
+      params.push(`%${query}%`);
+    }
+    if (/^[A-Z]$/.test(group)) {
+      conditions.push("SUBSTR(name_lc, 1, 1) = ?");
+      params.push(group.toLocaleLowerCase());
+    } else if (group === "0-9") {
+      conditions.push("SUBSTR(name_lc, 1, 1) GLOB '[0-9]'");
+    } else if (group === "other") {
+      conditions.push("NOT (SUBSTR(name_lc, 1, 1) GLOB '[a-z0-9]')");
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const offset = (page - 1) * limit;
+    const order = sort === "name" ? "ORDER BY name_lc ASC" : "ORDER BY count DESC, name_lc ASC";
+    const totalRow = await this.db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM (
+        SELECT name_lc
+        FROM tags
+        ${where}
+        GROUP BY name_lc
+      )
+    `).bind(...params).first();
+    const rows = await this.db.prepare(`
+      SELECT MIN(name) AS name, SUM(gallery_count) AS count, name_lc
+      FROM tags
+      ${where}
+      GROUP BY name_lc
+      ${order}
+      LIMIT ? OFFSET ?
+    `).bind(...params, limit, offset).all();
+
+    return {
+      total: Number(totalRow?.total || 0),
+      tags: (rows.results || []).map((row) => ({
+        name: row.name,
+        count: Number(row.count || 0)
+      }))
+    };
+  }
+
   async albumByPhotoOffset(offset) {
     return this.db.prepare(`
       SELECT id, title, count, cover, href, album_order, start_offset, end_offset
@@ -168,6 +222,7 @@ async function handleApi(request, env, url) {
   if (request.method === "GET" && url.pathname === "/api/health") return json(await healthPayload(store));
   if (request.method === "GET" && url.pathname === "/api/home") return json(await homePayload(store, url));
   if (request.method === "GET" && url.pathname === "/api/albums") return json(await albumsPayload(store, url));
+  if (request.method === "GET" && url.pathname === "/api/tags") return json(await tagsPayload(store, url));
   if (request.method === "GET" && url.pathname === "/api/photos") return json(await photosPayload(store, url));
   if (request.method === "GET" && url.pathname.startsWith("/api/album/")) {
     const id = decodeURIComponent(url.pathname.slice("/api/album/".length));

@@ -52,6 +52,11 @@ const tagsByAlbum = new Map([
   ["album-a", ["Cosplay", "NIKKE"]],
   ["album-b", ["Portrait"]]
 ]);
+const tagRows = [
+  { name: "Cosplay", name_lc: "cosplay", count: 1 },
+  { name: "NIKKE", name_lc: "nikke", count: 1 },
+  { name: "Portrait", name_lc: "portrait", count: 1 }
+];
 
 class FakeD1Result {
   constructor(rows) {
@@ -122,6 +127,43 @@ class FakeD1 {
   }
 
   query(sql, params) {
+    if (sql.includes("FROM ( SELECT name_lc FROM tags")) {
+      let rows = [...tagRows];
+      let paramIndex = 0;
+      if (sql.includes("name_lc LIKE ?")) {
+        const query = String(params[paramIndex++]).replaceAll("%", "");
+        rows = rows.filter((row) => row.name_lc.includes(query));
+      }
+      if (sql.includes("SUBSTR(name_lc, 1, 1) = ?")) {
+        const group = String(params[paramIndex]);
+        rows = rows.filter((row) => row.name_lc.startsWith(group));
+      }
+      return new FakeD1Result([{ total: rows.length }]);
+    }
+
+    if (sql.includes("SELECT MIN(name) AS name, SUM(gallery_count) AS count")) {
+      let rows = [...tagRows];
+      let paramIndex = 0;
+      if (sql.includes("name_lc LIKE ?")) {
+        const query = String(params[paramIndex++]).replaceAll("%", "");
+        rows = rows.filter((row) => row.name_lc.includes(query));
+      }
+      if (sql.includes("SUBSTR(name_lc, 1, 1) = ?")) {
+        const group = String(params[paramIndex++]);
+        rows = rows.filter((row) => row.name_lc.startsWith(group));
+      }
+      rows.sort(sql.includes("ORDER BY name_lc ASC")
+        ? (left, right) => left.name_lc.localeCompare(right.name_lc)
+        : (left, right) => right.count - left.count || left.name_lc.localeCompare(right.name_lc));
+      const limit = params.at(-2);
+      const offset = params.at(-1);
+      return new FakeD1Result(rows.slice(offset, offset + limit));
+    }
+
+    if (sql === "SELECT COUNT(*) AS total FROM tags") {
+      return new FakeD1Result([{ total: tagRows.length }]);
+    }
+
     if (sql.includes("SELECT t.name FROM album_tags")) {
       return new FakeD1Result((tagsByAlbum.get(params[0]) || []).map((name) => ({ name })));
     }
@@ -298,6 +340,7 @@ async function main() {
   assert.equal(health.status, 200);
   assert.equal(health.body.albumCount, 2);
   assert.equal(health.body.photoCount, 3);
+  assert.equal(health.body.tagCount, 3);
 
   const home = await json("/api/home?seed=test");
   assert.equal(home.status, 200);
@@ -313,6 +356,15 @@ async function main() {
   assert.equal(tagged.status, 200);
   assert.equal(tagged.body.total, 1);
   assert.equal(tagged.body.albums[0].id, "album-a");
+
+  const tags = await json("/api/tags?limit=50");
+  assert.equal(tags.status, 200);
+  assert.equal(tags.body.total, 3);
+  assert.deepEqual(tags.body.tags.map((tag) => tag.name), ["Cosplay", "NIKKE", "Portrait"]);
+
+  const tagSearch = await json("/api/tags?q=nik&limit=50");
+  assert.equal(tagSearch.body.total, 1);
+  assert.equal(tagSearch.body.tags[0].name, "NIKKE");
 
   const detail = await json("/api/album/album-a");
   assert.equal(detail.status, 200);

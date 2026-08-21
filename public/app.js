@@ -4,6 +4,7 @@ const pendingLikes = new Map();
 
 const PAGE_SIZE = 32;
 const PHOTO_PAGE_SIZE = 72;
+const TAG_PAGE_SIZE = 300;
 const PHOTO_ROWS_PER_PAGE = 8;
 const DETAIL_ROWS_PER_PAGE = 8;
 const DETAIL_SIZE_KEY = "xrw-album-detail-size";
@@ -26,6 +27,7 @@ let searchTimer = null;
 let searchPage = 1;
 let searchQuery = "";
 let searchTag = "";
+let tagDirectoryState = null;
 let currentAlbum = null;
 let lightboxIndex = null;
 let detailImageScale = readDetailImageScale();
@@ -48,6 +50,7 @@ const staticData = {
   photoOffsets: new Map(),
   photoOrders: new Map(),
   randomAlbums: new Map(),
+  tags: null,
   likes: readStaticLikes()
 };
 
@@ -267,6 +270,10 @@ async function staticGetJson(url, options = {}) {
 
   if (path === "/api/albums") {
     return staticAlbumsResponse(requestUrl);
+  }
+
+  if (path === "/api/tags") {
+    return staticTagsResponse(requestUrl);
   }
 
   if (path === "/api/photos") {
@@ -686,6 +693,7 @@ function headerTemplate(manifest) {
   const hasAlbumCount = manifest.albumCount !== null
     && manifest.albumCount !== undefined
     && Number.isFinite(Number(manifest.albumCount));
+  const isTagsPage = appPathname() === "/tags";
   return `
     <header class="home-header">
       <div class="brand" aria-label="绮影志 VELVET ARCHIVE">
@@ -693,11 +701,17 @@ function headerTemplate(manifest) {
         <span class="brand-title">绮影志</span>
         <span class="brand-sub">VELVET ARCHIVE</span>
       </div>
-      <label class="search-box">
-        ${icons.search}
-        <input class="search-input" name="q" type="search" placeholder="搜索图集" value="${escapeHtml(searchTag || searchQuery)}" autocomplete="off">
-      </label>
+      ${isTagsPage ? '<span class="header-center-spacer" aria-hidden="true"></span>' : `
+        <label class="search-box">
+          ${icons.search}
+          <input class="search-input" name="q" type="search" placeholder="搜索图集" value="${escapeHtml(searchTag || searchQuery)}" autocomplete="off">
+        </label>
+      `}
       <div class="header-actions">
+        <button type="button" class="tag-directory-link ${appPathname() === "/tags" ? "active" : ""}" data-tags-page>
+          <span>标签</span>
+          ${Number(manifest.tagCount) ? `<span class="tag-directory-count">${formatCount(manifest.tagCount)}</span>` : ""}
+        </button>
         <span class="archive-count">${hasAlbumCount ? formatCount(manifest.albumCount) : "--"} Sets</span>
         ${themeButton()}
       </div>
@@ -715,6 +729,58 @@ function heroStat(en, cn, value) {
       <span class="hero-stat-num"${hasValue ? ` data-count-up="${target}" aria-label="${formatCount(target)}"` : ""} aria-live="off">--</span>
     </div>
   `;
+}
+
+function tagMatchesGroup(name, group) {
+  if (!group) return true;
+  const first = String(name || "").trim().charAt(0).toLocaleUpperCase();
+  if (group === "0-9") return /^[0-9]$/.test(first);
+  if (group === "other") return !/^[A-Z0-9]$/.test(first);
+  return first === group;
+}
+
+async function staticTagIndex() {
+  if (staticData.tags) return staticData.tags;
+  const albums = await staticAlbums();
+  const counts = new Map();
+  for (const album of albums) {
+    const seen = new Set();
+    for (const tag of normalizeTags(album.tags)) {
+      const key = tag.toLocaleLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const current = counts.get(key);
+      if (current) current.count += 1;
+      else counts.set(key, { name: tag, count: 1 });
+    }
+  }
+  staticData.tags = [...counts.values()];
+  return staticData.tags;
+}
+
+async function staticTagsResponse(requestUrl) {
+  const query = (requestUrl.searchParams.get("q") || "").trim().toLocaleLowerCase();
+  const requestedGroup = (requestUrl.searchParams.get("group") || "").trim().toLocaleUpperCase();
+  const group = requestedGroup === "0-9" || requestedGroup === "OTHER"
+    ? requestedGroup.toLocaleLowerCase()
+    : /^[A-Z]$/.test(requestedGroup) ? requestedGroup : "";
+  const sort = requestUrl.searchParams.get("sort") === "name" ? "name" : "count";
+  const page = Math.max(1, Number(requestUrl.searchParams.get("page") || 1));
+  const limit = Math.min(600, Math.max(50, Number(requestUrl.searchParams.get("limit") || TAG_PAGE_SIZE)));
+  const tags = await staticTagIndex();
+  const matched = tags
+    .filter((tag) => (!query || tag.name.toLocaleLowerCase().includes(query)) && tagMatchesGroup(tag.name, group))
+    .sort(sort === "name"
+      ? (left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+      : (left, right) => right.count - left.count || left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  const start = (page - 1) * limit;
+  return {
+    ok: true,
+    page,
+    limit,
+    total: matched.length,
+    tags: matched.slice(start, start + limit)
+  };
 }
 
 function normalizeTags(value) {
@@ -974,7 +1040,203 @@ async function renderHome() {
   }
 }
 
+function tagGroupButtons(activeGroup) {
+  const groups = [
+    { value: "", label: "全部" },
+    ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => ({ value: letter, label: letter })),
+    { value: "0-9", label: "0-9" },
+    { value: "other", label: "其他" }
+  ];
+  return groups.map((group) => `
+    <button type="button" class="tag-letter ${activeGroup === group.value ? "active" : ""}" data-tag-group="${group.value}" aria-pressed="${activeGroup === group.value}">${group.label}</button>
+  `).join("");
+}
+
+function tagsPageTemplate(manifest, state) {
+  return `
+    <div class="page-enter">
+      ${headerTemplate(manifest)}
+      <main class="tags-directory">
+        <div class="tags-page-top">
+          <button class="back-link" type="button" data-tags-home>
+            <span class="arrow">${icons.back}</span>
+            返回图库
+          </button>
+        </div>
+        <section class="tags-intro">
+          <p class="section-kicker">Index</p>
+          <h1 class="tags-title">全部标签</h1>
+          <p class="tags-summary" data-tags-summary>共 ${formatCount(manifest.tagCount || 0)} 个标签</p>
+        </section>
+        <section class="tags-controls" aria-label="标签筛选">
+          <label class="tag-search-box">
+            ${icons.search}
+            <input type="search" value="${escapeHtml(state.query)}" placeholder="搜索标签名称…" autocomplete="off" data-tag-search>
+          </label>
+          <label class="tag-sort-control">
+            <span>排序</span>
+            <select data-tag-sort aria-label="标签排序方式">
+              <option value="count" ${state.sort === "count" ? "selected" : ""}>按图集数排序</option>
+              <option value="name" ${state.sort === "name" ? "selected" : ""}>按名称排序</option>
+            </select>
+          </label>
+        </section>
+        <nav class="tag-alphabet" aria-label="按首字母筛选">
+          ${tagGroupButtons(state.group)}
+        </nav>
+        <section class="tag-cloud" data-tag-cloud aria-live="polite"></section>
+        <div class="tag-directory-status" data-tag-directory-status></div>
+      </main>
+      ${backToTopButton()}
+    </div>
+  `;
+}
+
+function tagCloudItem(tag) {
+  const count = Number(tag.count) || 0;
+  const size = count >= 1000 ? "xl" : count >= 250 ? "lg" : count >= 50 ? "md" : "sm";
+  return `
+    <button type="button" class="tag-cloud-item size-${size}" data-tag-name="${escapeHtml(tag.name)}">
+      <span>${escapeHtml(tag.name)}</span><sup>${formatCount(count)}</sup>
+    </button>
+  `;
+}
+
+function bindTagCloudButtons(root = app) {
+  root.querySelectorAll("[data-tag-name]").forEach((button) => {
+    if (button.dataset.bound === "true") return;
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      const tag = button.dataset.tagName;
+      if (tag) navigate(`/?tag=${encodeURIComponent(tag)}`);
+    });
+  });
+}
+
+function syncTagDirectoryUrl() {
+  if (!tagDirectoryState) return;
+  const params = new URLSearchParams();
+  if (tagDirectoryState.query) params.set("q", tagDirectoryState.query);
+  if (tagDirectoryState.sort !== "count") params.set("sort", tagDirectoryState.sort);
+  if (tagDirectoryState.group) params.set("group", tagDirectoryState.group);
+  const query = params.toString();
+  history.replaceState({}, "", appUrl(`/tags${query ? `?${query}` : ""}`));
+}
+
+function renderTagDirectoryStatus() {
+  const status = app.querySelector("[data-tag-directory-status]");
+  const summary = app.querySelector("[data-tags-summary]");
+  if (!status || !tagDirectoryState) return;
+  const shown = tagDirectoryState.tags.length;
+  if (summary) {
+    summary.textContent = `共 ${formatCount(tagDirectoryState.total)} 个标签 · 当前显示 ${formatCount(shown)} 个`;
+  }
+  if (tagDirectoryState.loading) {
+    status.innerHTML = '<span class="tag-loading-label">正在整理标签…</span>';
+  } else if (!shown) {
+    status.innerHTML = '<span class="end-label">没有匹配的标签</span>';
+  } else if (tagDirectoryState.hasMore) {
+    status.innerHTML = '<button type="button" class="more-btn" data-more-tags>继续加载</button>';
+    status.querySelector("[data-more-tags]")?.addEventListener("click", () => loadTagDirectory(false).catch(errorPanel));
+  } else {
+    status.innerHTML = '<span class="end-label">已经显示全部标签</span>';
+  }
+}
+
+async function loadTagDirectory(reset = false) {
+  if (!tagDirectoryState || tagDirectoryState.loading) return;
+  if (reset) {
+    tagDirectoryState.page = 0;
+    tagDirectoryState.total = 0;
+    tagDirectoryState.tags = [];
+    tagDirectoryState.hasMore = true;
+    const cloud = app.querySelector("[data-tag-cloud]");
+    if (cloud) cloud.innerHTML = "";
+  }
+  if (!tagDirectoryState.hasMore) return;
+
+  tagDirectoryState.loading = true;
+  renderTagDirectoryStatus();
+  const nextPage = tagDirectoryState.page + 1;
+  const params = new URLSearchParams({
+    page: String(nextPage),
+    limit: String(TAG_PAGE_SIZE),
+    sort: tagDirectoryState.sort
+  });
+  if (tagDirectoryState.query) params.set("q", tagDirectoryState.query);
+  if (tagDirectoryState.group) params.set("group", tagDirectoryState.group);
+  const data = await getJson(`/api/tags?${params.toString()}`);
+  tagDirectoryState.page = data.page;
+  tagDirectoryState.total = data.total;
+  tagDirectoryState.tags.push(...data.tags);
+  tagDirectoryState.hasMore = data.page * data.limit < data.total;
+  tagDirectoryState.loading = false;
+
+  const cloud = app.querySelector("[data-tag-cloud]");
+  if (cloud) cloud.insertAdjacentHTML("beforeend", data.tags.map(tagCloudItem).join(""));
+  bindTagCloudButtons(cloud || app);
+  renderTagDirectoryStatus();
+}
+
+async function renderTagsPage() {
+  if (!homeManifest) {
+    const health = await getJson("/api/health");
+    homeManifest = {
+      albumCount: health.albumCount,
+      photoCount: health.photoCount,
+      tagCount: Number(health.tagCount) || 0,
+      builtAt: health.builtAt
+    };
+  }
+  const params = new URLSearchParams(location.search);
+  const requestedGroup = (params.get("group") || "").trim();
+  tagDirectoryState = {
+    query: (params.get("q") || "").trim(),
+    sort: params.get("sort") === "name" ? "name" : "count",
+    group: requestedGroup === "0-9" || requestedGroup === "other" || /^[A-Z]$/.test(requestedGroup) ? requestedGroup : "",
+    tags: [],
+    page: 0,
+    total: Number(homeManifest.tagCount) || 0,
+    hasMore: true,
+    loading: false
+  };
+  app.innerHTML = tagsPageTemplate(homeManifest, tagDirectoryState);
+  bindThemeButtons(app);
+  bindBackToTop();
+  app.querySelector("[data-tags-home]")?.addEventListener("click", () => navigate("/"));
+  app.querySelector("[data-tags-page]")?.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
+  const input = app.querySelector("[data-tag-search]");
+  input?.addEventListener("input", () => {
+    tagDirectoryState.query = input.value.trim();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      syncTagDirectoryUrl();
+      loadTagDirectory(true).catch(errorPanel);
+    }, 220);
+  });
+  app.querySelector("[data-tag-sort]")?.addEventListener("change", (event) => {
+    tagDirectoryState.sort = event.currentTarget.value === "name" ? "name" : "count";
+    syncTagDirectoryUrl();
+    loadTagDirectory(true).catch(errorPanel);
+  });
+  app.querySelectorAll("[data-tag-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      tagDirectoryState.group = button.dataset.tagGroup || "";
+      app.querySelectorAll("[data-tag-group]").forEach((item) => {
+        const active = item === button;
+        item.classList.toggle("active", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
+      syncTagDirectoryUrl();
+      loadTagDirectory(true).catch(errorPanel);
+    });
+  });
+  await loadTagDirectory(true);
+}
+
 function bindHomeControls() {
+  app.querySelector("[data-tags-page]")?.addEventListener("click", () => navigate("/tags"));
   app.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", async () => {
       activeTab = button.dataset.tab;
@@ -2272,6 +2534,8 @@ async function route() {
   try {
     if (match) {
       await renderAlbum(decodeURIComponent(match[1]));
+    } else if (appPathname() === "/tags") {
+      await renderTagsPage();
     } else {
       await renderHome();
     }
