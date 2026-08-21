@@ -855,7 +855,7 @@ img {
 }
 
 .detail {
-  padding-top: clamp(28px, 4vw, 48px);
+  padding-top: clamp(18px, 2.4vw, 30px);
 }
 
 .detail-top {
@@ -863,7 +863,7 @@ img {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: clamp(44px, 6vw, 72px);
+  margin-bottom: clamp(18px, 2.6vw, 32px);
 }
 
 .back-link {
@@ -920,11 +920,11 @@ img {
 .detail-banner {
   position: relative;
   isolation: isolate;
-  min-height: clamp(320px, 34vw, 460px);
-  margin: 0 calc(var(--gutter) * -1) clamp(40px, 5vw, 64px);
-  padding: clamp(48px, 7vw, 96px) var(--gutter) clamp(36px, 5vw, 64px);
+  width: 100vw;
+  margin: 0 calc(50% - 50vw) clamp(40px, 5vw, 64px);
+  padding: clamp(38px, 4.8vw, 68px) 0;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   overflow: hidden;
   background: #211c19;
 }
@@ -950,8 +950,10 @@ img {
 
 .detail-banner-content {
   min-width: 0;
-  width: 100%;
-  align-self: flex-end;
+  width: min(100%, var(--max));
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+  align-self: center;
 }
 
 .detail-banner .detail-title {
@@ -1551,9 +1553,8 @@ img {
   }
 
   .detail-banner {
-    min-height: 440px;
-    padding-top: 44px;
-    padding-bottom: 32px;
+    padding-top: 34px;
+    padding-bottom: 34px;
   }
 
   .detail-banner-image {

@@ -172,7 +172,7 @@ function pagesIndex(html) {
   return html
     .replace('href="/favicon.svg?v=1"', `href="${basePath}/favicon.svg?v=1"`)
     .replace('href="/lib/fancybox.css?v=20260821-1"', `href="${basePath}/lib/fancybox.css?v=20260821-1"`)
-    .replace('href="/styles.css?v=20260821-10"', `href="${basePath}/styles.css?v=20260821-10"`)
+    .replace('href="/styles.css?v=20260821-11"', `href="${basePath}/styles.css?v=20260821-11"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
     .replace('src="/app.js?v=20260821-10"', `src="${basePath}/app.js?v=20260821-10"`)
     .replace("  </head>", `${config}\n  </head>`);
