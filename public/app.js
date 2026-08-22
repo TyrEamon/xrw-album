@@ -623,7 +623,7 @@ function initSmoothScroll() {
     autoResize: true,
     smoothWheel: true,
     syncTouch: false,
-    duration: 1.05,
+    duration: 1.2,
     anchors: true,
     stopInertiaOnNavigate: true,
     respectReducedMotion: true,

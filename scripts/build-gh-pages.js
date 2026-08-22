@@ -185,7 +185,7 @@ function pagesIndex(html) {
     .replace('href="/styles.css?v=20260822-3"', `href="${basePath}/styles.css?v=20260822-3"`)
     .replace('src="/lib/lenis.min.js?v=1.3.26"', `src="${basePath}/lib/lenis.min.js?v=1.3.26"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
-    .replace('src="/app.js?v=20260822-5"', `src="${basePath}/app.js?v=20260822-5"`)
+    .replace('src="/app.js?v=20260822-6"', `src="${basePath}/app.js?v=20260822-6"`)
     .replace("  </head>", `${config}\n  </head>`);
 }
 
