@@ -21,6 +21,7 @@ const STATIC_DATA_BASE = window.__XRW_STATIC_DATA_BASE || "";
 const BASE_PATH = normalizeBasePath(window.__XRW_BASE_PATH || "");
 
 let homeManifest = null;
+let smoothScroll = null;
 let activeTab = "photos";
 let infiniteObserver = null;
 let searchTimer = null;
@@ -615,6 +616,29 @@ function currentTheme() {
   return "dark";
 }
 
+function initSmoothScroll() {
+  if (smoothScroll || typeof window.Lenis !== "function") return;
+  smoothScroll = new window.Lenis({
+    autoRaf: true,
+    autoResize: true,
+    smoothWheel: true,
+    syncTouch: false,
+    duration: 1.05,
+    anchors: true,
+    stopInertiaOnNavigate: true,
+    respectReducedMotion: true,
+    prevent: (node) => node.classList?.contains("fancybox__container") === true
+  });
+}
+
+function scrollPageToTop(immediate = false) {
+  if (smoothScroll) {
+    smoothScroll.scrollTo(0, { immediate, force: true });
+    return;
+  }
+  window.scrollTo({ top: 0, behavior: immediate ? "auto" : "smooth" });
+}
+
 function themeButton() {
   return `<button type="button" class="theme-toggle" data-theme-toggle aria-label="切换主题">${currentTheme() === "dark" ? icons.sun : icons.moon}</button>`;
 }
@@ -966,7 +990,7 @@ function backToTopButton() {
 
 function bindBackToTop() {
   app.querySelector("[data-back-to-top]")?.addEventListener("click", () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollPageToTop();
   });
   syncBackToTop();
 }
@@ -1204,7 +1228,7 @@ async function renderTagsPage() {
   bindThemeButtons(app);
   bindBackToTop();
   app.querySelector("[data-tags-home]")?.addEventListener("click", () => navigate("/"));
-  app.querySelector("[data-tags-page]")?.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  app.querySelector("[data-tags-page]")?.addEventListener("click", () => scrollPageToTop());
 
   const input = app.querySelector("[data-tag-search]");
   input?.addEventListener("input", () => {
@@ -1250,7 +1274,7 @@ function bindHomeControls() {
       app.querySelector("[data-photo-order-control]")?.classList.toggle("is-hidden", activeTab !== "photos");
       app.querySelector("[data-album-order]")?.classList.toggle("is-hidden", activeTab !== "albums");
       if (!searchQuery && !searchTag) {
-        window.scrollTo({ top: 0, behavior: "instant" });
+        scrollPageToTop(true);
         await showActiveTab();
       }
     });
@@ -1297,7 +1321,7 @@ function bindHomeControls() {
     const label = button.querySelector("[data-album-order-label]");
     if (label) label.textContent = nextOrder === "asc" ? "最早" : "最新";
     activeTab = "albums";
-    window.scrollTo({ top: 0, behavior: "instant" });
+    scrollPageToTop(true);
     await showActiveTab();
   });
 
@@ -1314,7 +1338,7 @@ function bindHomeControls() {
         tabButton.classList.toggle("active", selected);
         tabButton.setAttribute("aria-selected", String(selected));
       });
-      window.scrollTo({ top: 0, behavior: "instant" });
+      scrollPageToTop(true);
       await showActiveTab();
     });
   });
@@ -2542,8 +2566,10 @@ async function route() {
   } catch (error) {
     errorPanel(error);
   }
+  requestAnimationFrame(() => smoothScroll?.resize());
 }
 
+initSmoothScroll();
 window.addEventListener("popstate", () => route().catch(errorPanel));
 window.addEventListener("scroll", onHomeScroll, { passive: true });
 window.addEventListener("scroll", syncBackToTop, { passive: true });
