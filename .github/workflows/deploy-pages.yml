@@ -44,6 +44,7 @@ jobs:
           GITHUB_PAGES_BASE: /
           SNAPSHOT_DATA_DIR: ../snapshot-data/batches
           GIMG_PUBLIC_BASE: https://gimg.mtcacg.top
+          EXTERNAL_DATA_SOURCES: xrw-data-1=https://tyreamon.github.io/xrw-data-1/data,xrw-data-2=https://tyreamon.github.io/xrw-data-2/data,xrw-data-3=https://tyreamon.github.io/xrw-data-3/data
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

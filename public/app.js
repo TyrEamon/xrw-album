@@ -46,6 +46,8 @@ let lastAutoLoadAt = 0;
 const staticData = {
   manifest: null,
   albums: null,
+  sources: null,
+  catalogs: null,
   details: new Map(),
   shards: new Map(),
   photoOffsets: new Map(),
@@ -73,8 +75,8 @@ function appUrl(path) {
   return `${BASE_PATH}${path === "/" ? "" : path}`;
 }
 
-function dataUrl(path) {
-  const base = STATIC_DATA_BASE || `${BASE_PATH || ""}/data`;
+function dataUrl(path, sourceBase = "") {
+  const base = sourceBase || STATIC_DATA_BASE || `${BASE_PATH || ""}/data`;
   return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
@@ -286,7 +288,7 @@ async function staticGetJson(url, options = {}) {
     const albums = await staticAlbums();
     const album = albums.find((item) => item.id === id);
     if (!album) throw new Error("Not found");
-    const detail = await staticAlbumDetail(id);
+    const detail = await staticAlbumDetail(id, album);
     return {
       ok: true,
       album: withStaticLike(album),
@@ -302,35 +304,111 @@ async function staticGetJson(url, options = {}) {
   throw new Error(`Static route not found: ${path}`);
 }
 
-async function fetchStaticJson(path) {
-  const response = await fetch(dataUrl(path), {
+async function fetchStaticJson(path, sourceBase = "") {
+  const response = await fetch(dataUrl(path, sourceBase), {
     headers: { Accept: "application/json" }
   });
   if (!response.ok) throw new Error(`Static data failed: ${response.status}`);
   return response.json();
 }
 
+async function staticSources() {
+  if (!staticData.sources) {
+    const localBase = STATIC_DATA_BASE || `${BASE_PATH || ""}/data`;
+    let configured = [];
+    try {
+      const registry = await fetchStaticJson("sources.json", localBase);
+      configured = Array.isArray(registry.sources) ? registry.sources : [];
+    } catch {
+      configured = [];
+    }
+    const seen = new Set(["main"]);
+    staticData.sources = [{ id: "main", base: localBase }, ...configured.flatMap((source) => {
+      const id = String(source?.id || "").trim();
+      const base = String(source?.base || "").replace(/\/+$/g, "");
+      if (!id || !base || seen.has(id)) return [];
+      try {
+        const parsed = new URL(base, location.origin);
+        if (!["http:", "https:"].includes(parsed.protocol)) return [];
+      } catch {
+        return [];
+      }
+      seen.add(id);
+      return [{ id, base }];
+    })];
+  }
+  return staticData.sources;
+}
+
+async function staticCatalogs() {
+  if (!staticData.catalogs) {
+    const sources = await staticSources();
+    staticData.catalogs = await Promise.all(sources.map(async (source) => {
+      try {
+        const [manifest, albums] = await Promise.all([
+          fetchStaticJson("manifest.json", source.base),
+          fetchStaticJson("albums.json", source.base)
+        ]);
+        if (!Array.isArray(albums)) throw new Error("Static album catalog is invalid");
+        return {
+          source,
+          manifest,
+          albums: albums.map((album) => ({ ...album, bucket: source.id }))
+        };
+      } catch (error) {
+        if (source.id === "main") throw error;
+        console.warn(`External data source unavailable: ${source.id}`, error);
+        return null;
+      }
+    }));
+    staticData.catalogs = staticData.catalogs.filter(Boolean);
+  }
+  return staticData.catalogs;
+}
+
 async function staticManifest() {
   if (!staticData.manifest) {
-    staticData.manifest = await fetchStaticJson("manifest.json");
+    const catalogs = await staticCatalogs();
+    const local = catalogs.find((catalog) => catalog.source.id === "main")?.manifest || {};
+    const albums = catalogs.flatMap((catalog) => catalog.albums);
+    const tags = new Set();
+    for (const album of albums) {
+      for (const tag of normalizeTags(album.tags)) tags.add(tag.toLocaleLowerCase());
+    }
+    staticData.manifest = {
+      ...local,
+      albumCount: albums.length,
+      photoCount: albums.reduce((total, album) => total + Number(album.count || 0), 0),
+      maxPhotosPerAlbum: albums.reduce((maximum, album) => Math.max(maximum, Number(album.count || 0)), 0),
+      tagCount: tags.size,
+      dataSourceCount: catalogs.length
+    };
   }
   return staticData.manifest;
 }
 
 async function staticAlbums() {
   if (!staticData.albums) {
-    staticData.albums = await fetchStaticJson("albums.json");
+    const catalogs = await staticCatalogs();
+    staticData.albums = catalogs.flatMap((catalog) => catalog.albums)
+      .map((album, order) => ({ ...album, order }));
   }
   return staticData.albums;
 }
 
-async function staticAlbumDetail(id) {
+async function staticAlbumDetail(id, albumHint = null) {
   if (!staticData.details.has(id)) {
+    const album = albumHint || (await staticAlbums()).find((item) => item.id === id);
+    if (!album) throw new Error(`Static album not found: ${id}`);
+    const sources = await staticSources();
+    const source = sources.find((item) => item.id === (album.bucket || "main"));
+    if (!source) throw new Error(`Static data source not found: ${album.bucket || "main"}`);
     const shardKey = photoShardKey(id);
-    if (!staticData.shards.has(shardKey)) {
-      staticData.shards.set(shardKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`));
+    const cacheKey = `${source.id}:${shardKey}`;
+    if (!staticData.shards.has(cacheKey)) {
+      staticData.shards.set(cacheKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`, source.base));
     }
-    const detail = staticData.shards.get(shardKey)?.[id];
+    const detail = staticData.shards.get(cacheKey)?.[id];
     if (!detail) throw new Error(`Static album detail not found: ${id}`);
     staticData.details.set(id, detail);
   }
@@ -466,7 +544,7 @@ async function staticPhotoFromOffset(offset, mode = "sequence", seedValue = "pho
   const offsets = await staticPhotoOffsets(mode, seedValue);
   const entry = staticPhotoOffsetEntry(offsets, offset);
   if (!entry) return null;
-  const detail = await staticAlbumDetail(entry.album.id);
+  const detail = await staticAlbumDetail(entry.album.id, entry.album);
   const localIndex = offset - entry.start;
   const photoIndex = mode === "random"
     ? staticRandomPhotoIndex(entry.album.id, detail.photos.length, localIndex, seedValue)

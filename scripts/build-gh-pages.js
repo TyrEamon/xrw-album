@@ -12,6 +12,19 @@ const snapshotDir = process.env.SNAPSHOT_DATA_DIR
   ? path.resolve(rootDir, process.env.SNAPSHOT_DATA_DIR)
   : "";
 const githubImageBase = String(process.env.GIMG_PUBLIC_BASE || "").replace(/\/+$/g, "");
+const externalDataSources = String(process.env.EXTERNAL_DATA_SOURCES || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .map((value) => {
+    const separator = value.indexOf("=");
+    if (separator < 1) throw new Error(`Invalid external data source: ${value}`);
+    const id = value.slice(0, separator).trim();
+    const base = value.slice(separator + 1).trim().replace(/\/+$/g, "");
+    const parsed = new URL(base);
+    if (parsed.protocol !== "https:") throw new Error(`External data source must use HTTPS: ${id}`);
+    return { id, base };
+  });
 
 function rewriteGitHubImageUrl(value) {
   if (!githubImageBase || typeof value !== "string" || value === "") return value;
@@ -169,6 +182,10 @@ async function writeAlbumsAndManifest(snapshotGalleries) {
   };
   await fs.writeFile(path.join(outDir, "data/albums.json"), `${JSON.stringify(combined)}\n`);
   await fs.writeFile(path.join(outDir, "data/manifest.json"), `${JSON.stringify(manifest)}\n`);
+  await fs.writeFile(path.join(outDir, "data/sources.json"), `${JSON.stringify({
+    version: 1,
+    sources: externalDataSources
+  })}\n`);
 }
 
 function pagesIndex(html) {
@@ -185,7 +202,7 @@ function pagesIndex(html) {
     .replace('href="/styles.css?v=20260822-3"', `href="${basePath}/styles.css?v=20260822-3"`)
     .replace('src="/lib/lenis.min.js?v=1.3.26"', `src="${basePath}/lib/lenis.min.js?v=1.3.26"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
-    .replace('src="/app.js?v=20260822-6"', `src="${basePath}/app.js?v=20260822-6"`)
+    .replace('src="/app.js?v=20260823-1"', `src="${basePath}/app.js?v=20260823-1"`)
     .replace("  </head>", `${config}\n  </head>`);
 }
 
@@ -213,6 +230,7 @@ async function main() {
   console.log(`Snapshot albums: ${snapshotGalleries.length}`);
   console.log(`Unique tags: ${countUniqueSnapshotTags(snapshotGalleries)}`);
   console.log(`GitHub image proxy: ${githubImageBase || "disabled"}`);
+  console.log(`External data sources: ${externalDataSources.map((source) => source.id).join(", ") || "none"}`);
 }
 
 main().catch((error) => {
