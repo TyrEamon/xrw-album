@@ -40,14 +40,17 @@ import json
 import os
 import sys
 
-total = 0
+photos_by_gallery = {}
 for filename in glob.glob(os.path.join(sys.argv[1], "*.json")):
     with open(filename, "r", encoding="utf-8") as handle:
         batch = json.load(handle)
     for gallery in batch.get("galleries", []):
+        gallery_id = gallery.get("id")
+        if not gallery_id:
+            continue
         photos = gallery.get("photos")
-        total += len(photos) if isinstance(photos, list) else int(gallery.get("count", 0))
-print(total)
+        photos_by_gallery[gallery_id] = len(photos) if isinstance(photos, list) else int(gallery.get("count", 0))
+print(sum(photos_by_gallery.values()))
 PY
 }
 
