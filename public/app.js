@@ -2568,6 +2568,7 @@ function openLightbox(index) {
     startIndex: index,
     closeExisting: true,
     dragToClose: true,
+    idle: mobileViewer ? 2500 : false,
     Thumbs: { autoStart: !mobileViewer },
     Toolbar: {
       display: mobileViewer
