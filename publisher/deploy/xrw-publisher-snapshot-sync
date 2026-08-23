@@ -75,16 +75,16 @@ prepare_repo() {
     exit 1
   fi
 
-  # A previous run may have committed before the network failed. Push that
-  # commit before considering a bucket switch.
+  # Preserve a batch created before a network interruption, then replay it on
+  # top of any harmless repository metadata updates before pushing.
   git add -- batches
   if ! git diff --cached --quiet; then
     git -c user.name="xrw-publisher" -c user.email="xrw-publisher@users.noreply.github.com" \
       commit -m "Update gallery snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
-  git_for_bucket push origin "${branch}"
   git_for_bucket fetch origin "${branch}"
-  git merge --ff-only "origin/${branch}"
+  git rebase "origin/${branch}"
+  git_for_bucket push origin "${branch}"
 }
 
 prepare_repo
