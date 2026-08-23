@@ -1801,6 +1801,24 @@ img {
 }
 
 @media (max-width: 520px) {
+  .hero-stats {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 0.9fr);
+    gap: clamp(2px, 1vw, 6px);
+  }
+
+  .hero-stat-num,
+  .hero-stat:nth-child(2) .hero-stat-num {
+    padding-inline: 4px;
+    font-size: clamp(16px, 5.25vw, 22px);
+    letter-spacing: -0.025em;
+  }
+
+  .hero-stat-num::before,
+  .hero-stat-num::after {
+    width: 8px;
+    height: 8px;
+  }
+
   .home-header {
     grid-template-columns: minmax(0, 1fr) auto;
     column-gap: 6px;
