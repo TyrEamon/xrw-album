@@ -169,6 +169,12 @@ func (a *App) Run(ctx context.Context, maximum int) error {
 					_ = a.store.MarkGallery(ctx, gallery.SourceGalleryID, gallery.Status, gallery.LastError, 0)
 					return
 				}
+				if isUnsupportedVideo(gallery) {
+					const reason = "unsupported video entry: no image or attachment payload"
+					_ = a.store.MarkGallery(ctx, gallery.SourceGalleryID, "blocked", reason, 0)
+					a.logger.Info("video gallery skipped", "gallery", gallery.SourceGalleryID, "title", gallery.Title)
+					continue
+				}
 				a.logger.Info("processing gallery", "worker", workerID, "gallery", gallery.SourceGalleryID, "title", gallery.Title)
 				if err := a.processGallery(ctx, gallery); err != nil {
 					if ctx.Err() != nil {
@@ -230,6 +236,7 @@ func (a *App) processGallery(ctx context.Context, gallery model.Gallery) error {
 		if detail.ID != gallery.SourceGalleryID {
 			return fmt.Errorf("gallery detail id %d does not match requested id %d", detail.ID, gallery.SourceGalleryID)
 		}
+		normalizeDetail(&detail)
 		if err := validateDetail(detail); err != nil {
 			return err
 		}
@@ -451,6 +458,22 @@ func truncateRunes(value string, maximum int) string {
 		return string(runes[:maximum])
 	}
 	return string(runes[:maximum-1]) + "…"
+}
+
+func isUnsupportedVideo(gallery model.Gallery) bool {
+	return strings.EqualFold(strings.TrimSpace(gallery.Category), "video")
+}
+
+func normalizeDetail(detail *veil.GalleryDetail) {
+	if detail.CoverImageID != 0 {
+		return
+	}
+	for _, ref := range detail.Images {
+		if ref.SortOrder == 1 {
+			detail.CoverImageID = ref.ID
+			return
+		}
+	}
 }
 
 func validateDetail(detail veil.GalleryDetail) error {
