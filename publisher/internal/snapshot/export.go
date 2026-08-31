@@ -21,6 +21,7 @@ type Batch struct {
 	Version    int                    `json:"version"`
 	ExportedAt string                 `json:"exported_at"`
 	Galleries  []model.PublishPayload `json:"galleries"`
+	RemovedIDs []string               `json:"removed_ids,omitempty"`
 }
 
 type Options struct {
@@ -29,7 +30,7 @@ type Options struct {
 }
 
 func Export(ctx context.Context, database *store.Store, outDir string, limit int, options Options) (string, int, error) {
-	if err := options.validate(); err != nil {
+	if err := options.Validate(); err != nil {
 		return "", 0, err
 	}
 	candidates, err := database.PendingSnapshots(ctx, limit)
@@ -95,7 +96,7 @@ func Export(ctx context.Context, database *store.Store, outDir string, limit int
 	return target, len(payloads), nil
 }
 
-func (options Options) validate() error {
+func (options Options) Validate() error {
 	if options.ImageBase == "" && options.SigningSecret == "" {
 		return nil
 	}

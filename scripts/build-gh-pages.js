@@ -82,28 +82,38 @@ function normalizedTags(value) {
 }
 
 async function loadSnapshotGalleries() {
-  if (!snapshotDir) return [];
+  if (!snapshotDir) return { galleries: [], removedIDs: new Set() };
   try {
     const files = (await fs.readdir(snapshotDir)).filter((file) => file.endsWith(".json")).sort();
     const galleries = new Map();
+    const removedIDs = new Set();
     for (const file of files) {
       const batch = JSON.parse(await fs.readFile(path.join(snapshotDir, file), "utf8"));
       if (!Array.isArray(batch.galleries)) throw new Error(`Invalid snapshot batch: ${file}`);
+      if (batch.removed_ids !== undefined && !Array.isArray(batch.removed_ids)) {
+        throw new Error(`Invalid snapshot removals: ${file}`);
+      }
+      for (const id of batch.removed_ids || []) {
+        if (typeof id !== "string" || id === "") throw new Error(`Invalid removed gallery in ${file}`);
+        galleries.delete(id);
+        removedIDs.add(id);
+      }
       for (const gallery of batch.galleries) {
         if (!gallery?.id || !Array.isArray(gallery.photos) || gallery.photos.length !== gallery.count) {
           throw new Error(`Invalid snapshot gallery in ${file}: ${gallery?.id || "unknown"}`);
         }
+        removedIDs.delete(gallery.id);
         galleries.set(gallery.id, rewriteGalleryImages(gallery));
       }
     }
-    return [...galleries.values()];
+    return { galleries: [...galleries.values()], removedIDs };
   } catch (error) {
-    if (error.code === "ENOENT") return [];
+    if (error.code === "ENOENT") return { galleries: [], removedIDs: new Set() };
     throw error;
   }
 }
 
-async function writePhotoShards(snapshotGalleries) {
+async function writePhotoShards(snapshotGalleries, removedIDs) {
   const photosDir = path.join(rootDir, "data/photos");
   const shardDir = path.join(outDir, "data/photo-shards");
   const files = await fs.readdir(photosDir);
@@ -112,6 +122,7 @@ async function writePhotoShards(snapshotGalleries) {
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     const id = file.slice(0, -".json".length);
+    if (removedIDs.has(id)) continue;
     const shard = photoShardKey(id);
     if (!shards.has(shard)) shards.set(shard, {});
     const gallery = JSON.parse(await fs.readFile(path.join(photosDir, file), "utf8"));
@@ -153,9 +164,9 @@ function countUniqueSnapshotTags(snapshotGalleries) {
   return unique.size;
 }
 
-async function writeAlbumsAndManifest(snapshotGalleries) {
+async function writeAlbumsAndManifest(snapshotGalleries, removedIDs) {
   const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
-  const albums = new Map(baseAlbums.map((album) => [album.id, {
+  const albums = new Map(baseAlbums.filter((album) => !removedIDs.has(album.id)).map((album) => [album.id, {
     ...album,
     cover: rewriteGitHubImageUrl(album.cover)
   }]));
@@ -212,9 +223,9 @@ async function main() {
 
   await copyDir(path.join(rootDir, "public"), outDir);
   await fs.mkdir(path.join(outDir, "data"), { recursive: true });
-  const snapshotGalleries = await loadSnapshotGalleries();
-  await writeAlbumsAndManifest(snapshotGalleries);
-  const shardStats = await writePhotoShards(snapshotGalleries);
+  const { galleries: snapshotGalleries, removedIDs } = await loadSnapshotGalleries();
+  await writeAlbumsAndManifest(snapshotGalleries, removedIDs);
+  const shardStats = await writePhotoShards(snapshotGalleries, removedIDs);
 
   const indexPath = path.join(outDir, "index.html");
   const html = await fs.readFile(indexPath, "utf8");
@@ -228,6 +239,7 @@ async function main() {
   console.log(`Album details: ${shardStats.albumDetailCount}`);
   console.log(`Photo detail shards: ${shardStats.shardCount}`);
   console.log(`Snapshot albums: ${snapshotGalleries.length}`);
+  console.log(`Removed albums: ${removedIDs.size}`);
   console.log(`Unique tags: ${countUniqueSnapshotTags(snapshotGalleries)}`);
   console.log(`GitHub image proxy: ${githubImageBase || "disabled"}`);
   console.log(`External data sources: ${externalDataSources.map((source) => source.id).join(", ") || "none"}`);

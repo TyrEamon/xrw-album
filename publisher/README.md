@@ -153,6 +153,37 @@ vnstat -m
 
 两套图片Worker相互独立：桌面的 `xrw-album-gimg-worker` 服务GitHub Pages，不绑定D1；仓库内 `cf-image-worker` 部署为 `xrw-album-cimg`，绑定现有D1并服务CF站。它们和根目录主站分别使用不同Worker名称，部署其中一个不会覆盖另外两个。
 
+## 旧 Telegraph 图库迁移
+
+`xrw-legacy` 使用单独的 `legacy.db`，不会读写 Veil 发布器的 `publisher.db`。首次把源文本同步到本地任务库：
+
+```bash
+./xrw-legacy init -source /var/lib/xrw-publisher/linuxdo-85w.txt
+./xrw-legacy status
+```
+
+试跑一个图集并确认流量、频道和消息格式：
+
+```bash
+./xrw-legacy run -max 1 -workers 1
+```
+
+持续运行使用 `deploy/xrw-legacy.service`。迁移器会先下载并验证一个图集的全部原图，得到真实宽高后才按10个文件一组发布到分配频道。每组成功即保存 `file_id`、消息ID和断点并删除临时原图。源图片连续失败达到 `LEGACY_SOURCE_RETRIES` 后标为 `dead`，整包进入 `invalid`，不会进入最终D1快照。查看清理清单：
+
+```bash
+./xrw-legacy invalid-report -out /var/lib/xrw-publisher/legacy-work/invalid-albums.json
+```
+
+完成图集的完整TG映射保存在 `legacy-work/outbox/<album-id>.json`。迁移期间不修改线上D1；最终导入只合并 `ready` 图集，从而一次性替换旧Telegraph链接并排除失效图包。
+
+GitHub Pages 不需要等待全库完成。定时快照会把已完整迁移的图集按原 ID 覆盖为带宽高的 `gimg` 地址，并把已确认失效的整包写成 `removed_ids` 移除标记；尚未处理的图集继续使用仓库中的旧 Telegraph 数据，因此迁移过程不会出现半包。手动导出命令：
+
+```bash
+./xrw-legacy snapshot -out /var/lib/xrw-publisher/github-snapshot/batches -max 100
+```
+
+`xrw-publisher-snapshot-sync` 固定把旧图库覆盖批次写入主站 `snapshot` 分支，不会混入外部 Veil 数据仓库。快照只含签名后的公开图片 URL，不含 Bot Token、原始 `file_id` 或频道私密映射。全库对账满足“ready 图集 + invalid 图集 = 14,973”后，才可停止构建时读取原始 `linuxdo-85w.txt` 数据；原文件应先归档到独立分支或 Release，不直接永久删除。
+
 ## VPS 与节点
 
 建议使用 Linux x86_64、2 vCPU、2 GB 内存和40–60 GB SSD。发布器不会囤积全库图片，只保留当前批次、SQLite和日志；每组上传并写入断点后就删除临时原文件。单工作线程可在1 GB内存运行，但发布器和 sing-box/Xray 同机、同时开多个出口时，2 GB更稳。

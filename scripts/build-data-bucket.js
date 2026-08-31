@@ -27,13 +27,22 @@ async function loadGalleries() {
   }
 
   const galleries = new Map();
+  const removedIDs = new Set();
   for (const file of files) {
     const batch = JSON.parse(await fs.readFile(path.join(snapshotDir, file), "utf8"));
     if (!Array.isArray(batch.galleries)) throw new Error(`Invalid snapshot batch: ${file}`);
+    if (batch.removed_ids !== undefined && !Array.isArray(batch.removed_ids)) {
+      throw new Error(`Invalid snapshot removals: ${file}`);
+    }
+    for (const id of batch.removed_ids || []) {
+      galleries.delete(id);
+      removedIDs.add(id);
+    }
     for (const gallery of batch.galleries) {
       if (!gallery?.id || !Array.isArray(gallery.photos) || gallery.photos.length !== gallery.count) {
         throw new Error(`Invalid snapshot gallery in ${file}: ${gallery?.id || "unknown"}`);
       }
+      removedIDs.delete(gallery.id);
       galleries.set(gallery.id, gallery);
     }
   }

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 publisher_bin="${PUBLISHER_BIN:-/opt/xrw-publisher/xrw-publisher}"
+legacy_bin="${LEGACY_BIN:-/opt/xrw-publisher/xrw-legacy}"
 bucket_limit="${SNAPSHOT_BUCKET_MAX_PHOTOS:-1357200}"
 bucket_state="${SNAPSHOT_BUCKET_STATE:-/var/lib/xrw-publisher/snapshot-bucket}"
 
@@ -117,4 +118,28 @@ if (( current_count >= bucket_limit && bucket < 3 )); then
   echo "snapshot bucket sealed; next bucket=${bucket} photos=${current_count}"
 else
   echo "snapshot bucket=${bucket} photos=${current_count} limit=${bucket_limit}"
+fi
+
+# Legacy albums replace records that still live in the website repository, so
+# their overlays and tombstones always belong to the website snapshot branch.
+if [[ -x "${legacy_bin}" ]]; then
+  legacy_root="${bucket_roots[0]}"
+  legacy_branch="${bucket_branches[0]}"
+  cd "${legacy_root}"
+  git add -- batches
+  if ! git diff --cached --quiet; then
+    git -c user.name="xrw-publisher" -c user.email="xrw-publisher@users.noreply.github.com" \
+      commit -m "Recover legacy gallery snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  GIT_SSH_COMMAND="ssh -i ${bucket_keys[0]} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+    git fetch origin "${legacy_branch}"
+  git rebase "origin/${legacy_branch}"
+  "${legacy_bin}" snapshot -out "${legacy_root}/batches" -max 100
+  git add -- batches
+  if ! git diff --cached --quiet; then
+    git -c user.name="xrw-publisher" -c user.email="xrw-publisher@users.noreply.github.com" \
+      commit -m "Update legacy gallery snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  GIT_SSH_COMMAND="ssh -i ${bucket_keys[0]} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+    git push origin "${legacy_branch}"
 fi
