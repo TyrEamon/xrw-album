@@ -134,7 +134,7 @@ func New(baseURL string, proxies []string, requests int, window, cooldown, timeo
 		}
 		tlsConfig.NextProtos = []string{"http/1.1"}
 		transport.TLSClientConfig = tlsConfig
-		transport.ResponseHeaderTimeout = min(timeout, 20*time.Second)
+		transport.ResponseHeaderTimeout = timeout
 		transport.DialContext = func(ctx context.Context, _, address string) (net.Conn, error) {
 			return connector.DialContext(ctx, "tcp4", address)
 		}

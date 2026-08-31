@@ -79,15 +79,24 @@ func main() {
 		pages := flags.Int("pages", 5, "latest gallery pages to scan each cycle")
 		batch := flags.Int("batch", 0, "galleries processed between discovery cycles; 0 drains the queue")
 		fullScanInterval := flags.Duration("full-scan-interval", 24*time.Hour, "interval between full gallery rescans; 0 disables them")
+		initialFullScanOffset := flags.Int("initial-full-scan-offset", 0, "starting offset for the first full rescan after process start")
 		_ = flags.Parse(os.Args[2:])
+		if *initialFullScanOffset < 0 {
+			logger.Error("initial full scan offset must be non-negative")
+			os.Exit(2)
+		}
 		fatalIf(logger, database.RecoverProcessing(ctx))
 		var lastFullScan time.Time
 		for ctx.Err() == nil {
 			discoveryPages, fullScan := pagesForDiscovery(time.Now(), lastFullScan, *pages, *fullScanInterval)
-			if fullScan {
-				logger.Info("starting full gallery discovery")
+			discoveryOffset := 0
+			if fullScan && lastFullScan.IsZero() {
+				discoveryOffset = *initialFullScanOffset
 			}
-			if _, err := application.Discover(ctx, discoveryPages, 0); err != nil {
+			if fullScan {
+				logger.Info("starting full gallery discovery", "offset", discoveryOffset)
+			}
+			if _, err := application.Discover(ctx, discoveryPages, discoveryOffset); err != nil {
 				logger.Error("discovery cycle", "error", err)
 			} else if fullScan {
 				lastFullScan = time.Now()
