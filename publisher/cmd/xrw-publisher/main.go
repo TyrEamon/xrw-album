@@ -78,11 +78,20 @@ func main() {
 		flags := flag.NewFlagSet("daemon", flag.ExitOnError)
 		pages := flags.Int("pages", 5, "latest gallery pages to scan each cycle")
 		batch := flags.Int("batch", 0, "galleries processed between discovery cycles; 0 drains the queue")
+		fullScanInterval := flags.Duration("full-scan-interval", 24*time.Hour, "interval between full gallery rescans; 0 disables them")
 		_ = flags.Parse(os.Args[2:])
 		fatalIf(logger, database.RecoverProcessing(ctx))
+		var lastFullScan time.Time
 		for ctx.Err() == nil {
-			if _, err := application.Discover(ctx, *pages, 0); err != nil {
+			discoveryPages, fullScan := pagesForDiscovery(time.Now(), lastFullScan, *pages, *fullScanInterval)
+			if fullScan {
+				logger.Info("starting full gallery discovery")
+			}
+			if _, err := application.Discover(ctx, discoveryPages, 0); err != nil {
 				logger.Error("discovery cycle", "error", err)
+			} else if fullScan {
+				lastFullScan = time.Now()
+				logger.Info("full gallery discovery complete")
 			}
 			if err := application.Run(ctx, *batch); err != nil {
 				logger.Error("publisher cycle", "error", err)
@@ -129,6 +138,13 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+}
+
+func pagesForDiscovery(now, lastFullScan time.Time, latestPages int, fullScanInterval time.Duration) (int, bool) {
+	if fullScanInterval > 0 && (lastFullScan.IsZero() || now.Sub(lastFullScan) >= fullScanInterval) {
+		return 0, true
+	}
+	return latestPages, false
 }
 
 func gib(bytes int64) float64 {
