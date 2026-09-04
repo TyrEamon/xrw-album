@@ -18,7 +18,7 @@ const MAX_RENDERED_DETAIL_PAGES = 2;
 const STATIC_DATA_BASE = window.__XRW_STATIC_DATA_BASE || "";
 const JSON_FALLBACK_BASE = String(window.__XRW_JSON_FALLBACK_BASE || "").replace(/\/+$/, "");
 const DIRECT_JSON_TIMEOUT = 5000;
-const FALLBACK_JSON_TIMEOUT = 20000;
+const FALLBACK_JSON_TIMEOUT = 90000;
 const BASE_PATH = normalizeBasePath(window.__XRW_BASE_PATH || "");
 
 let homeManifest = null;
