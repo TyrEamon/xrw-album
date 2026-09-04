@@ -362,11 +362,25 @@ async function staticCatalogs() {
   return staticData.catalogs;
 }
 
+function mergeStaticCatalogAlbums(catalogs) {
+  const albumsById = new Map();
+  for (const catalog of catalogs) {
+    for (const album of catalog.albums) {
+      if (!album?.id) continue;
+      // Sources are ordered from the built-in archive to newer external buckets.
+      // Reinsert duplicates so the newest copy controls both its data and ordering.
+      albumsById.delete(album.id);
+      albumsById.set(album.id, album);
+    }
+  }
+  return [...albumsById.values()];
+}
+
 async function staticManifest() {
   if (!staticData.manifest) {
     const catalogs = await staticCatalogs();
     const local = catalogs.find((catalog) => catalog.source.id === "main")?.manifest || {};
-    const albums = catalogs.flatMap((catalog) => catalog.albums);
+    const albums = mergeStaticCatalogAlbums(catalogs);
     const tags = new Set();
     for (const album of albums) {
       for (const tag of normalizeTags(album.tags)) tags.add(tag.toLocaleLowerCase());
@@ -386,7 +400,7 @@ async function staticManifest() {
 async function staticAlbums() {
   if (!staticData.albums) {
     const catalogs = await staticCatalogs();
-    staticData.albums = catalogs.flatMap((catalog) => catalog.albums)
+    staticData.albums = mergeStaticCatalogAlbums(catalogs)
       .map((album, order) => ({ ...album, order }));
   }
   return staticData.albums;
