@@ -12,6 +12,7 @@ const snapshotDir = process.env.SNAPSHOT_DATA_DIR
   ? path.resolve(rootDir, process.env.SNAPSHOT_DATA_DIR)
   : "";
 const githubImageBase = String(process.env.GIMG_PUBLIC_BASE || "").replace(/\/+$/g, "");
+const jsonFallbackBase = String(process.env.JSON_FALLBACK_BASE || "").replace(/\/+$/g, "");
 const externalDataSources = String(process.env.EXTERNAL_DATA_SOURCES || "")
   .split(",")
   .map((value) => value.trim())
@@ -204,6 +205,7 @@ function pagesIndex(html) {
     <script>
       window.__XRW_BASE_PATH = ${JSON.stringify(basePath)};
       window.__XRW_STATIC_DATA_BASE = ${JSON.stringify(`${basePath}/data`)};
+      window.__XRW_JSON_FALLBACK_BASE = ${JSON.stringify(jsonFallbackBase)};
     </script>`;
 
   return html

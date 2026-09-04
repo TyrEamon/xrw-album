@@ -16,6 +16,9 @@ const MAX_RENDERED_ALBUM_PAGES = 2;
 const MAX_RENDERED_PHOTO_PAGES = 2;
 const MAX_RENDERED_DETAIL_PAGES = 2;
 const STATIC_DATA_BASE = window.__XRW_STATIC_DATA_BASE || "";
+const JSON_FALLBACK_BASE = String(window.__XRW_JSON_FALLBACK_BASE || "").replace(/\/+$/, "");
+const DIRECT_JSON_TIMEOUT = 5000;
+const FALLBACK_JSON_TIMEOUT = 20000;
 const BASE_PATH = normalizeBasePath(window.__XRW_BASE_PATH || "");
 
 let homeManifest = null;
@@ -300,12 +303,31 @@ async function staticGetJson(url, options = {}) {
   throw new Error(`Static route not found: ${path}`);
 }
 
-async function fetchStaticJson(path, sourceBase = "") {
-  const response = await fetch(dataUrl(path, sourceBase), {
-    headers: { Accept: "application/json" }
-  });
-  if (!response.ok) throw new Error(`Static data failed: ${response.status}`);
-  return response.json();
+async function fetchJsonWithTimeout(url, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`Static data failed: ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchStaticJson(path, sourceBase = "", sourceId = "main") {
+  const directUrl = dataUrl(path, sourceBase);
+  try {
+    return await fetchJsonWithTimeout(directUrl, DIRECT_JSON_TIMEOUT);
+  } catch (directError) {
+    if (!JSON_FALLBACK_BASE) throw directError;
+    const fallbackUrl = `${JSON_FALLBACK_BASE}/${encodeURIComponent(sourceId)}/${path.replace(/^\/+/, "")}`;
+    console.warn(`Direct static data unavailable; using gimg fallback: ${sourceId}/${path}`, directError);
+    return fetchJsonWithTimeout(fallbackUrl, FALLBACK_JSON_TIMEOUT);
+  }
 }
 
 async function staticSources() {
@@ -313,7 +335,7 @@ async function staticSources() {
     const localBase = STATIC_DATA_BASE || `${BASE_PATH || ""}/data`;
     let configured = [];
     try {
-      const registry = await fetchStaticJson("sources.json", localBase);
+      const registry = await fetchStaticJson("sources.json", localBase, "main");
       configured = Array.isArray(registry.sources) ? registry.sources : [];
     } catch {
       configured = [];
@@ -342,8 +364,8 @@ async function staticCatalogs() {
     staticData.catalogs = await Promise.all(sources.map(async (source) => {
       try {
         const [manifest, albums] = await Promise.all([
-          fetchStaticJson("manifest.json", source.base),
-          fetchStaticJson("albums.json", source.base)
+          fetchStaticJson("manifest.json", source.base, source.id),
+          fetchStaticJson("albums.json", source.base, source.id)
         ]);
         if (!Array.isArray(albums)) throw new Error("Static album catalog is invalid");
         return {
@@ -416,7 +438,7 @@ async function staticAlbumDetail(id, albumHint = null) {
     const shardKey = photoShardKey(id);
     const cacheKey = `${source.id}:${shardKey}`;
     if (!staticData.shards.has(cacheKey)) {
-      staticData.shards.set(cacheKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`, source.base));
+      staticData.shards.set(cacheKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`, source.base, source.id));
     }
     const detail = staticData.shards.get(cacheKey)?.[id];
     if (!detail) throw new Error(`Static album detail not found: ${id}`);
