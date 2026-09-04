@@ -1,5 +1,4 @@
 const app = document.querySelector("#app");
-const imageSizeCache = new Map();
 const pendingLikes = new Map();
 
 const PAGE_SIZE = 32;
@@ -13,7 +12,6 @@ const PREFETCH_DELAY = 120;
 const ALBUM_PAGE_RENDER_MARGIN = 900;
 const PHOTO_PAGE_RENDER_MARGIN = 650;
 const DETAIL_PAGE_RENDER_MARGIN = 650;
-const IMAGE_SIZE_CACHE_LIMIT = 1600;
 const MAX_RENDERED_ALBUM_PAGES = 2;
 const MAX_RENDERED_PHOTO_PAGES = 2;
 const MAX_RENDERED_DETAIL_PAGES = 2;
@@ -37,10 +35,8 @@ let tabs = createTabsState();
 let albumSyncFrame = null;
 let photoSyncFrame = null;
 let photoResizeTimer = null;
-let photoRelayoutTimer = null;
 let detailSyncFrame = null;
 let detailResizeTimer = null;
-let detailRelayoutTimer = null;
 let lastAutoLoadAt = 0;
 
 const staticData = {
@@ -624,15 +620,6 @@ function formatCount(value) {
   return new Intl.NumberFormat("zh-CN").format(value || 0);
 }
 
-function rememberImageSize(key, size) {
-  if (!key || imageSizeCache.has(key)) return false;
-  imageSizeCache.set(key, size);
-  while (imageSizeCache.size > IMAGE_SIZE_CACHE_LIMIT) {
-    imageSizeCache.delete(imageSizeCache.keys().next().value);
-  }
-  return true;
-}
-
 function readDetailImageScale() {
   let stored = 100;
   try {
@@ -737,21 +724,13 @@ function lazyImage(src, alt, eager = false, size = null) {
   const dimensions = width > 0 && height > 0
     ? ` width="${Math.round(width)}" height="${Math.round(height)}"`
     : "";
-  return `<img src="${escapeHtml(src)}" data-src-key="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${dimensions} referrerpolicy="no-referrer" decoding="async" fetchpriority="${priority}" ${eager ? 'loading="eager"' : 'loading="lazy"'}>`;
+  return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${dimensions} referrerpolicy="no-referrer" decoding="async" fetchpriority="${priority}" ${eager ? 'loading="eager"' : 'loading="lazy"'}>`;
 }
 
-function markLoadedImages(root = document, onSize) {
+function markLoadedImages(root = document) {
   root.querySelectorAll("img").forEach((image) => {
     const done = () => {
-      const key = image.dataset.srcKey || image.currentSrc || image.src;
-      const changed = image.naturalWidth > 0 && image.naturalHeight > 0
-        ? rememberImageSize(key, {
-            width: image.naturalWidth,
-            height: image.naturalHeight
-          })
-        : false;
       image.classList.add("loaded");
-      if (changed && onSize) onSize();
     };
     const failed = () => {
       image.classList.add("loaded", "broken");
@@ -1636,7 +1615,7 @@ function photoItem(photo, index, eager = false) {
 function photoPageShell(entry) {
   const height = entry.height || (!entry.rendered ? estimatePhotoPageHeight(entry) : 0);
   const minHeight = height ? ` style="min-height:${Math.round(height)}px"` : "";
-  return `<section class="photo-page ${entry.rendered ? "" : "is-placeholder"}" data-photo-page="${entry.page}"${minHeight}></section>`;
+  return `<section class="photo-page ${entry.rendered ? "" : "is-placeholder"}" data-photo-page="${entry.page}" data-layout-signature="${entry.layoutSignature || ""}"${minHeight}></section>`;
 }
 
 function photoPageNearViewport(element) {
@@ -1683,14 +1662,25 @@ function createPhotoPages(photos, config, previousPages = [], holdLastPartialRow
   for (let index = 0; index < rows.length; index += PHOTO_ROWS_PER_PAGE) {
     const pageNumber = pages.length + 1;
     const previous = previousPages.find((entry) => entry.page === pageNumber);
-    pages.push({
+    const entry = {
       page: pageNumber,
       rows: rows.slice(index, index + PHOTO_ROWS_PER_PAGE),
       height: previous?.height || 0,
       rendered: false
-    });
+    };
+    entry.layoutSignature = photoPageLayoutSignature(entry);
+    if (previous?.layoutSignature === entry.layoutSignature) {
+      entry.rendered = previous.rendered;
+    }
+    pages.push(entry);
   }
   return pages;
+}
+
+function photoPageLayoutSignature(entry) {
+  return entry.rows.map((row) => row.map((photo) => (
+    `${photo.sourceIndex}:${Math.round(photo.displayWidth * 10)}x${Math.round(photo.displayHeight * 10)}`
+  )).join(",")).join(";");
 }
 
 function estimatePhotoPageHeight(entry) {
@@ -1715,21 +1705,11 @@ function renderPhotoPage(entry, options = {}) {
   page.innerHTML = items.map((photo, index) => photoItem(photo, index, entry.page === 1 && index < 6)).join("");
   entry.rendered = true;
   bindAlbumCards(page);
-  markLoadedImages(page, schedulePhotoRelayout);
+  markLoadedImages(page);
   requestAnimationFrame(() => {
     entry.height = page.offsetHeight || entry.height;
     requestPhotoPageSync();
   });
-}
-
-function schedulePhotoRelayout() {
-  if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
-  clearTimeout(photoRelayoutTimer);
-  photoRelayoutTimer = setTimeout(() => {
-    photoRelayoutTimer = null;
-    if (appPathname() !== "/" || activeTab !== "photos" || searchQuery || searchTag) return;
-    renderPhotoTabGrid({ force: true });
-  }, 420);
 }
 
 function unrenderPhotoPage(entry) {
@@ -1791,7 +1771,25 @@ function appendPhotoPage(data) {
   const grid = app.querySelector("[data-tab-grid]");
   if (!grid) return;
 
-  renderPhotoTabGrid({ force: true });
+  renderPhotoTabGrid({ dataChanged: true });
+}
+
+function reconcilePhotoPageShells(grid, pages) {
+  const expectedPages = new Set(pages.map((entry) => String(entry.page)));
+  grid.querySelectorAll("[data-photo-page]").forEach((page) => {
+    if (!expectedPages.has(page.dataset.photoPage)) page.remove();
+  });
+
+  pages.forEach((entry) => {
+    const existing = grid.querySelector(`[data-photo-page="${entry.page}"]`);
+    if (!existing) {
+      grid.insertAdjacentHTML("beforeend", photoPageShell(entry));
+      return;
+    }
+    if (existing.dataset.layoutSignature !== entry.layoutSignature) {
+      existing.outerHTML = photoPageShell(entry);
+    }
+  });
 }
 
 function renderPhotoTabGrid(options = {}) {
@@ -1802,7 +1800,8 @@ function renderPhotoTabGrid(options = {}) {
 
   const config = photoLayoutConfig(grid);
   if (config.width < 100) return;
-  if (options.force || state.photoLayoutKey !== config.key || !state.pages.length) {
+  const layoutChanged = state.photoLayoutKey !== config.key;
+  if (options.force || options.dataChanged || layoutChanged || !state.pages.length) {
     state.pages = createPhotoPages(state.photos, config, state.pages, state.hasMore);
     state.photoLayoutKey = config.key;
   }
@@ -1814,12 +1813,20 @@ function renderPhotoTabGrid(options = {}) {
   const signature = `${state.mode}:${state.seed}:${state.photoLayoutKey}:${state.photos.length}:${state.pages.length}`;
   if (options.force || !wasPhotoGrid || grid.dataset.photoPages !== signature || grid.querySelector(".album-page")) {
     grid.dataset.photoPages = signature;
-    state.pages.forEach((entry) => {
-      entry.rendered = false;
-    });
-    grid.innerHTML = state.pages.map(photoPageShell).join("");
+    const canUpdateIncrementally = options.dataChanged
+      && wasPhotoGrid
+      && !layoutChanged
+      && !grid.querySelector(".album-page");
+    if (canUpdateIncrementally) {
+      reconcilePhotoPageShells(grid, state.pages);
+    } else {
+      state.pages.forEach((entry) => {
+        entry.rendered = false;
+      });
+      grid.innerHTML = state.pages.map(photoPageShell).join("");
+    }
   }
-  syncVisiblePhotoPages(options);
+  syncVisiblePhotoPages(options.dataChanged ? {} : options);
 }
 
 function renderInfiniteStatus() {
@@ -2337,20 +2344,11 @@ function renderDetailPage(entry, options = {}) {
   page.querySelectorAll("[data-photo-index]").forEach((button) => {
     button.addEventListener("click", () => openLightbox(Number(button.dataset.photoIndex)));
   });
-  markLoadedImages(page, scheduleDetailRelayout);
+  markLoadedImages(page);
   requestAnimationFrame(() => {
     entry.height = page.offsetHeight || entry.height;
     requestDetailPageSync();
   });
-}
-
-function scheduleDetailRelayout() {
-  if (!currentAlbum || !appPathname().startsWith("/album/")) return;
-  clearTimeout(detailRelayoutTimer);
-  detailRelayoutTimer = setTimeout(() => {
-    detailRelayoutTimer = null;
-    renderDetailRows({ force: true });
-  }, 420);
 }
 
 function unrenderDetailPage(entry) {
@@ -2437,8 +2435,7 @@ function singlePhotoRows(photos, containerWidth) {
     const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
       ? { width: Number(photo.width), height: Number(photo.height) }
       : null;
-    if (suppliedSize) rememberImageSize(photo.url, suppliedSize);
-    const size = suppliedSize || imageSizeCache.get(photo.url) || { width: 3, height: 4 };
+    const size = suppliedSize || { width: 3, height: 4 };
     const rawRatio = size.width / size.height;
     const ratio = Number.isFinite(rawRatio) && rawRatio > 0 ? rawRatio : 0.75;
     return [{
@@ -2460,8 +2457,7 @@ function rowLayoutRows(photos, width, targetHeight, gap) {
     const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
       ? { width: Number(photo.width), height: Number(photo.height) }
       : null;
-    if (suppliedSize) rememberImageSize(photo.url, suppliedSize);
-    const size = suppliedSize || imageSizeCache.get(photo.url) || { width: 3, height: 4 };
+    const size = suppliedSize || { width: 3, height: 4 };
     const rawRatio = size.width / size.height;
     const ratio = Math.min(2.8, Math.max(0.45, Number.isFinite(rawRatio) ? rawRatio : 0.75));
     row.push({ ...photo, sourceIndex: photo.sourceIndex ?? index, ratio });
