@@ -1766,7 +1766,7 @@ function rowFilledWidth(row, gap) {
 }
 
 function createMasonryPhotoPages(photos, config, previousPages = []) {
-  const desiredWidth = Math.max(112, Math.round(config.targetHeight * 0.78));
+  const desiredWidth = Math.max(112, Math.round(config.targetHeight * 0.64));
   const columnCount = Math.max(2, Math.floor((config.width + config.gap) / (desiredWidth + config.gap)));
   const columnWidth = (config.width - (columnCount - 1) * config.gap) / columnCount;
   const pages = [];
