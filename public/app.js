@@ -108,6 +108,7 @@ function createTabsState() {
       prefetching: false,
       prefetchKey: "",
       prefetchPromise: null,
+      scope: "album",
       mode: "random",
       seed: String(Date.now()),
       photoLayoutKey: ""
@@ -169,7 +170,11 @@ const icons = {
   back: lucideIcon("chevron-left", '<path d="m15 18-6-6 6-6"/>'),
   heart: lucideIcon("heart", '<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>'),
   up: lucideIcon("arrow-up", '<path d="m5 12 7-7 7 7M12 19V5"/>'),
-  sort: lucideIcon("arrow-up-down", '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>')
+  sort: lucideIcon("arrow-up-down", '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>'),
+  image: lucideIcon("image", '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>'),
+  images: lucideIcon("images", '<path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/>'),
+  list: lucideIcon("list-ordered", '<path d="M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>'),
+  shuffle: lucideIcon("shuffle", '<path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h1.5a6.5 6.5 0 0 0 5.15-2.52L15.35 6A6.5 6.5 0 0 1 20.5 3H22M2 6h1.5a6.5 6.5 0 0 1 5.15 2.52l.57.81"/>')
 };
 
 function escapeHtml(value) {
@@ -599,27 +604,52 @@ async function staticPhotosResponse(requestUrl) {
   const manifest = await staticManifest();
   const requestedMode = requestUrl.searchParams.get("mode");
   const mode = requestedMode === "random" ? "random" : "sequence";
+  const scope = requestUrl.searchParams.get("scope") === "album" ? "album" : "all";
   const seed = requestUrl.searchParams.get("seed") || "photos";
   const page = Math.max(1, Number(requestUrl.searchParams.get("page") || 1));
   const limit = Math.min(120, Math.max(24, Number(requestUrl.searchParams.get("limit") || 72)));
-  const total = manifest.photoCount || 0;
+  const albums = scope === "album" ? await staticAlbums() : null;
+  const orderedAlbums = scope === "album"
+    ? mode === "random"
+      ? staticShuffledAlbums(albums, `album-previews:${seed}`)
+      : [...albums].reverse()
+    : null;
+  const total = scope === "album" ? orderedAlbums.length : manifest.photoCount || 0;
   const start = (page - 1) * limit;
   const end = Math.min(start + limit, total);
-  const photos = [];
+  const photos = scope === "album"
+    ? orderedAlbums.slice(start, end).map(staticAlbumPreviewPhoto)
+    : [];
 
-  for (let position = start; position < end; position += 1) {
-    const photo = await staticPhotoFromOffset(position, mode, seed);
-    if (photo) photos.push(photo);
+  if (scope === "all") {
+    for (let position = start; position < end; position += 1) {
+      const photo = await staticPhotoFromOffset(position, mode, seed);
+      if (photo) photos.push(photo);
+    }
   }
 
   return {
     ok: true,
+    scope,
     mode,
     seed,
     page,
     limit,
     total,
     photos
+  };
+}
+
+function staticAlbumPreviewPhoto(album) {
+  return {
+    id: `${album.id}-cover`,
+    albumId: album.id,
+    albumTitle: album.title,
+    albumHref: album.href,
+    photoId: 1,
+    url: normalizeImageUrl(album.cover),
+    width: Number(album.coverWidth) || undefined,
+    height: Number(album.coverHeight) || undefined
   };
 }
 
@@ -961,25 +991,36 @@ function heroTemplate(manifest) {
   `;
 }
 
-function resetPhotosState(mode = tabs.photos.mode || "sequence") {
+function resetPhotosState({
+  scope = tabs.photos.scope || "album",
+  mode = tabs.photos.mode || "random"
+} = {}) {
   tabs.photos = {
     photos: [],
     pages: [],
     page: 0,
-    total: homeManifest?.photoCount || tabs.photos.total || 0,
+    total: scope === "album"
+      ? homeManifest?.albumCount || 0
+      : homeManifest?.photoCount || 0,
     hasMore: true,
     loading: false,
     prefetch: null,
     prefetching: false,
     prefetchKey: "",
     prefetchPromise: null,
+    scope,
     mode,
     seed: mode === "random" ? String(Date.now()) : "photos",
     photoLayoutKey: ""
   };
 }
 
-function updatePhotoOrderButtons() {
+function updatePhotoBrowseControls() {
+  app.querySelectorAll("[data-photo-scope]").forEach((button) => {
+    const selected = button.dataset.photoScope === tabs.photos.scope;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
   app.querySelectorAll("[data-photo-mode]").forEach((button) => {
     const selected = button.dataset.photoMode === tabs.photos.mode;
     button.classList.toggle("active", selected);
@@ -1026,10 +1067,7 @@ function homeTemplate(data) {
                   ${icons.sort}
                   <span data-album-order-label>${tabs.albums.order === "asc" ? "最早" : "最新"}</span>
                 </button>
-                <div class="photo-order-control ${activeTab === "photos" ? "" : "is-hidden"}" data-photo-order-control role="group" aria-label="全部图片排序">
-                  <button type="button" class="photo-order-btn ${tabs.photos.mode === "sequence" ? "active" : ""}" data-photo-mode="sequence" aria-pressed="${tabs.photos.mode === "sequence"}">顺序</button>
-                  <button type="button" class="photo-order-btn ${tabs.photos.mode === "random" ? "active" : ""}" data-photo-mode="random" aria-pressed="${tabs.photos.mode === "random"}">随机</button>
-                </div>
+                ${photoBrowseControlsTemplate()}
                 <label class="detail-size-control photo-size-control ${activeTab === "photos" ? "" : "is-hidden"}" data-photo-size>
                   <span class="detail-size-label">显示大小</span>
                   <input type="range" min="100" max="300" step="10" value="${detailImageScale}" data-home-size-slider aria-label="调整全部图片显示大小">
@@ -1230,6 +1268,29 @@ function bindTagCloudButtons(root = app) {
   });
 }
 
+function photoBrowseControlsTemplate() {
+  return `
+    <div class="photo-browse-controls ${activeTab === "photos" ? "" : "is-hidden"}" data-photo-browse-controls aria-label="图片浏览方式">
+      <div class="photo-segmented-control" role="group" aria-label="图片取景范围">
+        <button type="button" class="photo-control-button ${tabs.photos.scope === "album" ? "active" : ""}" data-photo-scope="album" aria-pressed="${tabs.photos.scope === "album"}" title="每个图集展示一张封面">
+          ${icons.image}<span>选集</span>
+        </button>
+        <button type="button" class="photo-control-button ${tabs.photos.scope === "all" ? "active" : ""}" data-photo-scope="all" aria-pressed="${tabs.photos.scope === "all"}" title="展示图集内的全部图片">
+          ${icons.images}<span>全览</span>
+        </button>
+      </div>
+      <div class="photo-segmented-control" role="group" aria-label="图片排列顺序">
+        <button type="button" class="photo-control-button ${tabs.photos.mode === "sequence" ? "active" : ""}" data-photo-mode="sequence" aria-pressed="${tabs.photos.mode === "sequence"}" title="按图集更新时间排列">
+          ${icons.list}<span>顺序</span>
+        </button>
+        <button type="button" class="photo-control-button ${tabs.photos.mode === "random" ? "active" : ""}" data-photo-mode="random" aria-pressed="${tabs.photos.mode === "random"}" title="重新随机排列">
+          ${icons.shuffle}<span>随机</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function syncTagDirectoryUrl() {
   if (!tagDirectoryState) return;
   const params = new URLSearchParams();
@@ -1364,7 +1425,7 @@ function bindHomeControls() {
       });
       app.querySelector("[data-random-refresh]")?.classList.toggle("is-hidden", activeTab !== "random");
       app.querySelector("[data-photo-size]")?.classList.toggle("is-hidden", activeTab !== "photos");
-      app.querySelector("[data-photo-order-control]")?.classList.toggle("is-hidden", activeTab !== "photos");
+      app.querySelector("[data-photo-browse-controls]")?.classList.toggle("is-hidden", activeTab !== "photos");
       app.querySelector("[data-album-order]")?.classList.toggle("is-hidden", activeTab !== "albums");
       if (!searchQuery && !searchTag) {
         scrollPageToTop(true);
@@ -1424,13 +1485,26 @@ function bindHomeControls() {
       if (tabs.photos.mode === nextMode && nextMode !== "random") return;
 
       activeTab = "photos";
-      resetPhotosState(nextMode);
-      updatePhotoOrderButtons();
+      resetPhotosState({ mode: nextMode });
+      updatePhotoBrowseControls();
       app.querySelectorAll("[data-tab]").forEach((tabButton) => {
         const selected = tabButton.dataset.tab === activeTab;
         tabButton.classList.toggle("active", selected);
         tabButton.setAttribute("aria-selected", String(selected));
       });
+      scrollPageToTop(true);
+      await showActiveTab();
+    });
+  });
+
+  app.querySelectorAll("[data-photo-scope]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const nextScope = button.dataset.photoScope === "all" ? "all" : "album";
+      if (tabs.photos.scope === nextScope) return;
+
+      activeTab = "photos";
+      resetPhotosState({ scope: nextScope });
+      updatePhotoBrowseControls();
       scrollPageToTop(true);
       await showActiveTab();
     });
@@ -1846,7 +1920,7 @@ function renderPhotoTabGrid(options = {}) {
   const wasPhotoGrid = grid.dataset.gridKind === "photos";
   grid.dataset.gridKind = "photos";
   delete grid.dataset.albumPages;
-  const signature = `${state.mode}:${state.seed}:${state.photoLayoutKey}:${state.photos.length}:${state.pages.length}`;
+  const signature = `${state.scope}:${state.mode}:${state.seed}:${state.photoLayoutKey}:${state.photos.length}:${state.pages.length}`;
   if (options.force || !wasPhotoGrid || grid.dataset.photoPages !== signature || grid.querySelector(".album-page")) {
     grid.dataset.photoPages = signature;
     const canUpdateIncrementally = options.dataChanged
@@ -1924,13 +1998,14 @@ async function loadMoreActiveTab() {
   if (tab === "photos") {
     state.page = data.page;
     state.total = data.total;
+    state.scope = data.scope || state.scope;
     state.mode = data.mode || state.mode;
     state.seed = data.seed || state.seed;
     state.hasMore = data.page * data.limit < data.total;
     state.loading = false;
     appendPhotoPage(data);
     updateTabCounts();
-    updatePhotoOrderButtons();
+    updatePhotoBrowseControls();
 
     if (activeTab !== tab || searchQuery || searchTag) return;
     renderInfiniteStatus();
@@ -1957,13 +2032,14 @@ function tabPageRequest(tab, page) {
 
   if (tab === "photos") {
     const params = new URLSearchParams({
+      scope: state.scope,
       mode: state.mode,
       page: String(page),
       limit: String(PHOTO_PAGE_SIZE),
       seed: state.seed
     });
     return {
-      key: `photos:${state.mode}:${state.seed}:${page}:${PHOTO_PAGE_SIZE}`,
+      key: `photos:${state.scope}:${state.mode}:${state.seed}:${page}:${PHOTO_PAGE_SIZE}`,
       url: `/api/photos?${params.toString()}`
     };
   }
@@ -2074,7 +2150,7 @@ function updateTabCounts() {
   app.querySelectorAll("[data-tab]").forEach((button) => {
     const tab = button.dataset.tab;
     const fallback = tab === "photos" ? homeManifest?.photoCount : homeManifest?.albumCount;
-    const count = tabs[tab]?.total || fallback || 0;
+    const count = tab === "photos" ? fallback || 0 : tabs[tab]?.total || fallback || 0;
     const node = button.querySelector(".home-tab-count");
     if (node) node.textContent = count ? formatCount(count) : "";
   });

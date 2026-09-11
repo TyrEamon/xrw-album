@@ -213,15 +213,35 @@ export async function albumPayload(store, albumId) {
 export async function photosPayload(store, url) {
   const requestedMode = url.searchParams.get("mode");
   const mode = requestedMode === "random" ? "random" : "sequence";
+  const scope = url.searchParams.get("scope") === "album" ? "album" : "all";
   const seed = url.searchParams.get("seed") || "photos";
   const page = Math.max(1, Number(url.searchParams.get("page") || 1));
   const limit = Math.min(120, Math.max(24, Number(url.searchParams.get("limit") || 72)));
   const manifest = await store.manifest();
-  const total = manifest.photoCount || 0;
+  let total = manifest.photoCount || 0;
   const startOffset = (page - 1) * limit;
   const photos = [];
 
-  if (mode === "random") {
+  if (scope === "album") {
+    const result = await store.albums({
+      mode: mode === "random" ? "random" : "recent",
+      seed,
+      page,
+      limit
+    });
+    total = result.total;
+    photos.push(...result.albums.map((album) => ({
+      id: `${album.id}-cover`,
+      albumId: album.id,
+      albumTitle: album.title,
+      albumHref: album.href,
+      photoId: 1,
+      url: normalizeImageUrl(album.cover),
+      ...(Number(album.coverWidth) > 0 && Number(album.coverHeight) > 0
+        ? { width: Number(album.coverWidth), height: Number(album.coverHeight) }
+        : {})
+    })));
+  } else if (mode === "random") {
     const endOffset = Math.min(startOffset + limit, total);
     for (let position = startOffset; position < endOffset; position += 1) {
       const photo = await photoPayloadFromOffset(store, randomPhotoOffset(position, total, seed));
@@ -248,6 +268,7 @@ export async function photosPayload(store, url) {
 
   return {
     ok: true,
+    scope,
     mode,
     seed,
     page,

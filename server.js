@@ -279,24 +279,59 @@ async function photoPayloadFromOffset(offset) {
   const photo = detail.photos[photoIndex];
   if (!photo) return null;
 
-  return {
-    id: `${entry.album.id}-${photo.id}`,
-    albumId: entry.album.id,
-    albumTitle: entry.album.title,
-    albumHref: entry.album.href,
+  return localPhotoSummary(entry.album, photo);
+}
+
+function localPhotoSummary(album, photo) {
+  const result = {
+    id: `${album.id}-${photo.id}`,
+    albumId: album.id,
+    albumTitle: album.title,
+    albumHref: album.href,
     photoId: photo.id,
     url: photo.url
   };
+  const width = Number(photo.width);
+  const height = Number(photo.height);
+  if (width > 0 && height > 0) {
+    result.width = width;
+    result.height = height;
+  }
+  return result;
 }
 
 async function photosPayload(url) {
   const requestedMode = url.searchParams.get("mode");
   const mode = requestedMode === "random" ? "random" : "sequence";
+  const scope = url.searchParams.get("scope") === "album" ? "album" : "all";
   const seed = url.searchParams.get("seed") || "photos";
   const page = Math.max(1, Number(url.searchParams.get("page") || 1));
   const limit = Math.min(120, Math.max(24, Number(url.searchParams.get("limit") || 72)));
   const startOffset = (page - 1) * limit;
   const photos = [];
+
+  if (scope === "album") {
+    const orderedAlbums = mode === "random"
+      ? shuffledAlbums(`album-previews:${seed}`)
+      : recentAlbums;
+    const endOffset = Math.min(startOffset + limit, orderedAlbums.length);
+    for (const album of orderedAlbums.slice(startOffset, endOffset)) {
+      const detail = await readAlbumDetail(album.id);
+      const cover = normalizeImageUrl(album.cover);
+      const photo = detail.photos.find((item) => item.url === cover) || detail.photos[0];
+      if (photo) photos.push(localPhotoSummary(album, photo));
+    }
+    return {
+      ok: true,
+      scope,
+      mode,
+      seed,
+      page,
+      limit,
+      total: orderedAlbums.length,
+      photos
+    };
+  }
 
   if (mode === "random") {
     const endOffset = Math.min(startOffset + limit, runningPhotoTotal);
@@ -307,6 +342,7 @@ async function photosPayload(url) {
 
     return {
       ok: true,
+      scope,
       mode,
       seed,
       page,
@@ -328,14 +364,7 @@ async function photosPayload(url) {
 
       for (let index = 0; index < take; index += 1) {
         const photo = detail.photos[startInAlbum + index];
-        photos.push({
-          id: `${entry.album.id}-${photo.id}`,
-          albumId: entry.album.id,
-          albumTitle: entry.album.title,
-          albumHref: entry.album.href,
-          photoId: photo.id,
-          url: photo.url
-        });
+        photos.push(localPhotoSummary(entry.album, photo));
       }
 
       offset = entry.end;
@@ -345,6 +374,7 @@ async function photosPayload(url) {
 
   return {
     ok: true,
+    scope,
     mode,
     seed,
     page,

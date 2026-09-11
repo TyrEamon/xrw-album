@@ -58,12 +58,16 @@ async function main() {
 
   for (const gallery of galleries) {
     const normalized = normalizedTags(gallery.tags);
+    const coverPhoto = gallery.photos?.[0];
     for (const tag of normalized) tags.add(tag.toLocaleLowerCase());
     albums.push({
       id: gallery.id,
       title: gallery.title,
       count: gallery.count,
       cover: gallery.cover,
+      ...(Number(coverPhoto?.width) > 0 && Number(coverPhoto?.height) > 0
+        ? { coverWidth: Number(coverPhoto.width), coverHeight: Number(coverPhoto.height) }
+        : {}),
       href: gallery.href || `/album/${gallery.id}`,
       tags: normalized,
       bucket: bucketId

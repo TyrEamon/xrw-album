@@ -119,6 +119,7 @@ async function writePhotoShards(snapshotGalleries, removedIDs) {
   const shardDir = path.join(outDir, "data/photo-shards");
   const files = await fs.readdir(photosDir);
   const shards = new Map();
+  const coverSizes = new Map();
 
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
@@ -128,6 +129,10 @@ async function writePhotoShards(snapshotGalleries, removedIDs) {
     if (!shards.has(shard)) shards.set(shard, {});
     const gallery = JSON.parse(await fs.readFile(path.join(photosDir, file), "utf8"));
     shards.get(shard)[id] = rewriteGalleryImages(gallery);
+    const coverPhoto = gallery.photos?.[0];
+    if (Number(coverPhoto?.width) > 0 && Number(coverPhoto?.height) > 0) {
+      coverSizes.set(id, { coverWidth: Number(coverPhoto.width), coverHeight: Number(coverPhoto.height) });
+    }
   }
 
   for (const gallery of snapshotGalleries) {
@@ -141,6 +146,10 @@ async function writePhotoShards(snapshotGalleries, removedIDs) {
       tags: normalizedTags(gallery.tags),
       photos: gallery.photos
     };
+    const coverPhoto = gallery.photos?.[0];
+    if (Number(coverPhoto?.width) > 0 && Number(coverPhoto?.height) > 0) {
+      coverSizes.set(gallery.id, { coverWidth: Number(coverPhoto.width), coverHeight: Number(coverPhoto.height) });
+    }
   }
 
   await fs.mkdir(shardDir, { recursive: true });
@@ -149,7 +158,8 @@ async function writePhotoShards(snapshotGalleries, removedIDs) {
   }
   return {
     albumDetailCount: [...shards.values()].reduce((count, shard) => count + Object.keys(shard).length, 0),
-    shardCount: shards.size
+    shardCount: shards.size,
+    coverSizes
   };
 }
 
@@ -165,11 +175,12 @@ function countUniqueSnapshotTags(snapshotGalleries) {
   return unique.size;
 }
 
-async function writeAlbumsAndManifest(snapshotGalleries, removedIDs) {
+async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes) {
   const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
   const albums = new Map(baseAlbums.filter((album) => !removedIDs.has(album.id)).map((album) => [album.id, {
     ...album,
-    cover: rewriteGitHubImageUrl(album.cover)
+    cover: rewriteGitHubImageUrl(album.cover),
+    ...coverSizes.get(album.id)
   }]));
   for (const gallery of snapshotGalleries) {
     albums.set(gallery.id, {
@@ -177,6 +188,7 @@ async function writeAlbumsAndManifest(snapshotGalleries, removedIDs) {
       title: gallery.title,
       count: gallery.count,
       cover: gallery.cover,
+      ...coverSizes.get(gallery.id),
       href: gallery.href || `/album/${gallery.id}`,
       tags: normalizedTags(gallery.tags)
     });
@@ -212,10 +224,10 @@ function pagesIndex(html) {
     .replace('href="/favicon.svg?v=1"', `href="${basePath}/favicon.svg?v=1"`)
     .replace('href="/lib/lenis.css?v=1.3.26"', `href="${basePath}/lib/lenis.css?v=1.3.26"`)
     .replace('href="/lib/fancybox.css?v=20260821-1"', `href="${basePath}/lib/fancybox.css?v=20260821-1"`)
-    .replace('href="/styles.css?v=20260823-1"', `href="${basePath}/styles.css?v=20260823-1"`)
+    .replace('href="/styles.css?v=20260911-1"', `href="${basePath}/styles.css?v=20260911-1"`)
     .replace('src="/lib/lenis.min.js?v=1.3.26"', `src="${basePath}/lib/lenis.min.js?v=1.3.26"`)
     .replace('src="/lib/fancybox.umd.js?v=20260821-1"', `src="${basePath}/lib/fancybox.umd.js?v=20260821-1"`)
-    .replace('src="/app.js?v=20260904-2"', `src="${basePath}/app.js?v=20260904-2"`)
+    .replace('src="/app.js?v=20260911-1"', `src="${basePath}/app.js?v=20260911-1"`)
     .replace("  </head>", `${config}\n  </head>`);
 }
 
@@ -226,8 +238,8 @@ async function main() {
   await copyDir(path.join(rootDir, "public"), outDir);
   await fs.mkdir(path.join(outDir, "data"), { recursive: true });
   const { galleries: snapshotGalleries, removedIDs } = await loadSnapshotGalleries();
-  await writeAlbumsAndManifest(snapshotGalleries, removedIDs);
   const shardStats = await writePhotoShards(snapshotGalleries, removedIDs);
+  await writeAlbumsAndManifest(snapshotGalleries, removedIDs, shardStats.coverSizes);
 
   const indexPath = path.join(outDir, "index.html");
   const html = await fs.readFile(indexPath, "utf8");

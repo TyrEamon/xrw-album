@@ -388,6 +388,13 @@ async function main() {
   assert.equal(photos.body.photos[2].url, "/file/veil-42");
   assert.equal(photos.body.photos[2].width, 900);
 
+  const albumPreviews = await json("/api/photos?scope=album&mode=sequence&page=1&limit=24");
+  assert.equal(albumPreviews.status, 200);
+  assert.equal(albumPreviews.body.scope, "album");
+  assert.equal(albumPreviews.body.total, 2);
+  assert.deepEqual(albumPreviews.body.photos.map((photo) => photo.albumId), ["album-b", "album-a"]);
+  assert.equal(albumPreviews.body.photos[1].url, "https://telegra.ph/file/a.jpg");
+
   const likeDb = new FakeD1();
   const likeResponse = await worker.fetch(new Request("https://example.test/api/like", {
     method: "POST",

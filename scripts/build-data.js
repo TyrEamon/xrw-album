@@ -67,6 +67,9 @@ async function main() {
       title: currentTitle,
       count: photos.length,
       cover: photos[0]?.url || "",
+      ...(Number(photos[0]?.width) > 0 && Number(photos[0]?.height) > 0
+        ? { coverWidth: Number(photos[0].width), coverHeight: Number(photos[0].height) }
+        : {}),
       href: `/album/${id}`,
       order: index
     });

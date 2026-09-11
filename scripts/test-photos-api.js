@@ -82,6 +82,11 @@ async function main() {
   const randomB = await getPhotos("mode=random&page=1&limit=24&seed=ui-order-test-b");
   assert.notDeepEqual(ids(randomB), ids(randomA));
 
+  const albumPreviews = await getPhotos("scope=album&mode=random&page=1&limit=24&seed=album-preview-test");
+  assert.equal(albumPreviews.scope, "album");
+  assert.equal(albumPreviews.photos.length, 24);
+  assert.equal(new Set(albumPreviews.photos.map((photo) => photo.albumId)).size, albumPreviews.photos.length);
+
   const badSourceAlbum = await getJson("/api/album/04qz-20e526d6e2");
   assert.equal(badSourceAlbum.album.cover.includes("telegra.phhttps"), false);
   assert.equal(badSourceAlbum.photos.some((photo) => photo.url.includes("telegra.phhttps")), false);
