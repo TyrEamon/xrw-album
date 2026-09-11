@@ -1550,6 +1550,15 @@ img {
   color: var(--ink-2);
 }
 
+.photos-waterfall.is-album-scope .photo-page {
+  position: relative;
+  display: block;
+}
+
+.photos-waterfall.is-album-scope .photo-tab-item {
+  position: absolute;
+}
+
 .tags-directory {
   width: min(100%, var(--max));
   margin: 0 auto;

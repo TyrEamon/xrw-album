@@ -1709,13 +1709,16 @@ function renderAlbumTabGrid(tab, options = {}) {
 }
 
 function photoItem(photo, index, eager = false) {
+  const position = Number.isFinite(photo.displayX) && Number.isFinite(photo.displayY)
+    ? `;left:${photo.displayX}px;top:${photo.displayY}px`
+    : "";
   return `
     <button
       type="button"
       class="jr-item photo-tab-item"
       data-album-id="${escapeHtml(photo.albumId)}"
       title="${escapeHtml(photo.albumTitle)}"
-      style="width:${photo.displayWidth}px;height:${photo.displayHeight}px"
+      style="width:${photo.displayWidth}px;height:${photo.displayHeight}px${position}"
     >
       ${lazyImage(photo.url, photo.albumTitle, eager, photo)}
     </button>
@@ -1724,8 +1727,12 @@ function photoItem(photo, index, eager = false) {
 
 function photoPageShell(entry) {
   const height = entry.height || (!entry.rendered ? estimatePhotoPageHeight(entry) : 0);
-  const minHeight = height ? ` style="min-height:${Math.round(height)}px"` : "";
-  return `<section class="photo-page ${entry.rendered ? "" : "is-placeholder"}" data-photo-page="${entry.page}" data-layout-signature="${entry.layoutSignature || ""}"${minHeight}></section>`;
+  const pageHeight = entry.layout === "masonry" && height
+    ? ` style="height:${Math.round(height)}px;min-height:${Math.round(height)}px"`
+    : height
+      ? ` style="min-height:${Math.round(height)}px"`
+      : "";
+  return `<section class="photo-page ${entry.rendered ? "" : "is-placeholder"}" data-photo-page="${entry.page}" data-layout-signature="${entry.layoutSignature || ""}"${pageHeight}></section>`;
 }
 
 function photoPageNearViewport(element) {
@@ -1758,7 +1765,54 @@ function rowFilledWidth(row, gap) {
   return row.reduce((total, item) => total + item.displayWidth, 0) + (row.length - 1) * gap;
 }
 
-function createPhotoPages(photos, config, previousPages = [], holdLastPartialRow = false) {
+function createMasonryPhotoPages(photos, config, previousPages = []) {
+  const desiredWidth = Math.max(112, Math.round(config.targetHeight * 0.78));
+  const columnCount = Math.max(2, Math.floor((config.width + config.gap) / (desiredWidth + config.gap)));
+  const columnWidth = (config.width - (columnCount - 1) * config.gap) / columnCount;
+  const pages = [];
+
+  for (let offset = 0; offset < photos.length; offset += PHOTO_PAGE_SIZE) {
+    const pageNumber = pages.length + 1;
+    const previous = previousPages.find((entry) => entry.page === pageNumber);
+    const columns = Array(columnCount).fill(0);
+    const items = photos.slice(offset, offset + PHOTO_PAGE_SIZE).map((photo, index) => {
+      const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
+        ? { width: Number(photo.width), height: Number(photo.height) }
+        : { width: 3, height: 4 };
+      const rawRatio = suppliedSize.width / suppliedSize.height;
+      const ratio = Math.min(2.8, Math.max(0.45, Number.isFinite(rawRatio) ? rawRatio : 0.75));
+      const column = columns.indexOf(Math.min(...columns));
+      const displayHeight = columnWidth / ratio;
+      const item = {
+        ...photo,
+        sourceIndex: offset + index,
+        displayWidth: columnWidth,
+        displayHeight,
+        displayX: column * (columnWidth + config.gap),
+        displayY: columns[column]
+      };
+      columns[column] += displayHeight + config.gap;
+      return item;
+    });
+    const layoutHeight = Math.max(0, ...columns) - (items.length ? config.gap : 0);
+    const entry = {
+      page: pageNumber,
+      layout: "masonry",
+      items,
+      height: layoutHeight,
+      rendered: false
+    };
+    entry.layoutSignature = photoPageLayoutSignature(entry);
+    if (previous?.layoutSignature === entry.layoutSignature) entry.rendered = previous.rendered;
+    pages.push(entry);
+  }
+
+  return pages;
+}
+
+function createPhotoPages(photos, config, previousPages = [], holdLastPartialRow = false, scope = "all") {
+  if (scope === "album") return createMasonryPhotoPages(photos, config, previousPages);
+
   const indexedPhotos = photos.map((photo, index) => ({
     ...photo,
     sourceIndex: index
@@ -1788,12 +1842,18 @@ function createPhotoPages(photos, config, previousPages = [], holdLastPartialRow
 }
 
 function photoPageLayoutSignature(entry) {
+  if (entry.layout === "masonry") {
+    return entry.items.map((photo) => (
+      `${photo.sourceIndex}:${Math.round(photo.displayX * 10)},${Math.round(photo.displayY * 10)}:${Math.round(photo.displayWidth * 10)}x${Math.round(photo.displayHeight * 10)}`
+    )).join(";");
+  }
   return entry.rows.map((row) => row.map((photo) => (
     `${photo.sourceIndex}:${Math.round(photo.displayWidth * 10)}x${Math.round(photo.displayHeight * 10)}`
   )).join(",")).join(";");
 }
 
 function estimatePhotoPageHeight(entry) {
+  if (entry.layout === "masonry") return entry.height || 0;
   const grid = app.querySelector("[data-tab-grid]");
   const { gap } = photoLayoutConfig(grid);
   return entry.rows.reduce((height, row, index) => {
@@ -1809,9 +1869,15 @@ function renderPhotoPage(entry, options = {}) {
 
   if (!options.force && entry.rendered) return;
 
-  const items = entry.rows.flat();
+  const items = entry.layout === "masonry" ? entry.items : entry.rows.flat();
   page.classList.remove("is-placeholder");
-  page.style.minHeight = "";
+  if (entry.layout === "masonry") {
+    page.style.height = `${Math.round(entry.height)}px`;
+    page.style.minHeight = `${Math.round(entry.height)}px`;
+  } else {
+    page.style.height = "";
+    page.style.minHeight = "";
+  }
   page.innerHTML = items.map((photo, index) => photoItem(photo, index, entry.page === 1 && index < 6)).join("");
   entry.rendered = true;
   bindAlbumCards(page);
@@ -1912,11 +1978,11 @@ function renderPhotoTabGrid(options = {}) {
   if (config.width < 100) return;
   const layoutChanged = state.photoLayoutKey !== config.key;
   if (options.force || options.dataChanged || layoutChanged || !state.pages.length) {
-    state.pages = createPhotoPages(state.photos, config, state.pages, state.hasMore);
+    state.pages = createPhotoPages(state.photos, config, state.pages, state.hasMore, state.scope);
     state.photoLayoutKey = config.key;
   }
 
-  grid.className = "photo-pages photos-waterfall";
+  grid.className = `photo-pages photos-waterfall ${state.scope === "album" ? "is-album-scope" : "is-all-scope"}`;
   const wasPhotoGrid = grid.dataset.gridKind === "photos";
   grid.dataset.gridKind = "photos";
   delete grid.dataset.albumPages;
