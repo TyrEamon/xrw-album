@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { applySnapshotBatch, comparePublishedAt } from "./snapshot-order.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -88,6 +89,7 @@ async function loadSnapshotGalleries() {
     const files = (await fs.readdir(snapshotDir)).filter((file) => file.endsWith(".json")).sort();
     const galleries = new Map();
     const removedIDs = new Set();
+    const revisions = new Map();
     for (const file of files) {
       const batch = JSON.parse(await fs.readFile(path.join(snapshotDir, file), "utf8"));
       if (!Array.isArray(batch.galleries)) throw new Error(`Invalid snapshot batch: ${file}`);
@@ -96,18 +98,15 @@ async function loadSnapshotGalleries() {
       }
       for (const id of batch.removed_ids || []) {
         if (typeof id !== "string" || id === "") throw new Error(`Invalid removed gallery in ${file}`);
-        galleries.delete(id);
-        removedIDs.add(id);
       }
       for (const gallery of batch.galleries) {
         if (!gallery?.id || !Array.isArray(gallery.photos) || gallery.photos.length !== gallery.count) {
           throw new Error(`Invalid snapshot gallery in ${file}: ${gallery?.id || "unknown"}`);
         }
-        removedIDs.delete(gallery.id);
-        galleries.set(gallery.id, rewriteGalleryImages(gallery));
       }
+      applySnapshotBatch(batch, file, galleries, removedIDs, revisions, rewriteGalleryImages);
     }
-    return { galleries: [...galleries.values()], removedIDs };
+    return { galleries: [...galleries.values()].sort(comparePublishedAt), removedIDs };
   } catch (error) {
     if (error.code === "ENOENT") return { galleries: [], removedIDs: new Set() };
     throw error;
@@ -190,10 +189,11 @@ async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes)
       cover: gallery.cover,
       ...coverSizes.get(gallery.id),
       href: gallery.href || `/album/${gallery.id}`,
-      tags: normalizedTags(gallery.tags)
+      tags: normalizedTags(gallery.tags),
+      ...(gallery.publishedAt ? { publishedAt: gallery.publishedAt } : {})
     });
   }
-  const combined = [...albums.values()].map((album, order) => ({ ...album, order }));
+  const combined = [...albums.values()].sort(comparePublishedAt).map((album, order) => ({ ...album, order }));
   const baseManifest = JSON.parse(await fs.readFile(path.join(rootDir, "data/manifest.json"), "utf8"));
   const manifest = {
     ...baseManifest,

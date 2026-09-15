@@ -391,23 +391,31 @@ async function staticCatalogs() {
 
 function mergeStaticCatalogAlbums(catalogs) {
   const albumsById = new Map();
+  const publishedTime = (album) => {
+    const time = Date.parse(album.publishedAt || "");
+    return Number.isFinite(time) ? time : 0;
+  };
   for (const catalog of catalogs) {
     for (const album of catalog.albums) {
       if (!album?.id) continue;
-      // Sources are ordered from the built-in archive to newer external buckets.
-      // Reinsert duplicates so the newest copy controls both its data and ordering.
+      const previous = albumsById.get(album.id);
+      if (previous && publishedTime(previous) > publishedTime(album)) continue;
+      // Prefer the newest published copy, or the later source when dates are unavailable.
       albumsById.delete(album.id);
       albumsById.set(album.id, album);
     }
   }
-  return [...albumsById.values()];
+  return [...albumsById.values()]
+    .map((album, index) => ({ album, index, time: publishedTime(album) }))
+    .sort((left, right) => left.time - right.time || left.index - right.index)
+    .map(({ album }) => album);
 }
 
 async function staticManifest() {
   if (!staticData.manifest) {
     const catalogs = await staticCatalogs();
     const local = catalogs.find((catalog) => catalog.source.id === "main")?.manifest || {};
-    const albums = mergeStaticCatalogAlbums(catalogs);
+    const albums = await staticAlbums();
     const tags = new Set();
     for (const album of albums) {
       for (const tag of normalizeTags(album.tags)) tags.add(tag.toLocaleLowerCase());

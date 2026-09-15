@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { applySnapshotBatch, comparePublishedAt } from "./snapshot-order.js";
 
 const snapshotDir = path.resolve(process.env.BUCKET_SNAPSHOT_DATA_DIR || "batches");
 const outDir = path.resolve(process.env.BUCKET_OUT_DIR || "public/data");
@@ -28,25 +29,21 @@ async function loadGalleries() {
 
   const galleries = new Map();
   const removedIDs = new Set();
+  const revisions = new Map();
   for (const file of files) {
     const batch = JSON.parse(await fs.readFile(path.join(snapshotDir, file), "utf8"));
     if (!Array.isArray(batch.galleries)) throw new Error(`Invalid snapshot batch: ${file}`);
     if (batch.removed_ids !== undefined && !Array.isArray(batch.removed_ids)) {
       throw new Error(`Invalid snapshot removals: ${file}`);
     }
-    for (const id of batch.removed_ids || []) {
-      galleries.delete(id);
-      removedIDs.add(id);
-    }
     for (const gallery of batch.galleries) {
       if (!gallery?.id || !Array.isArray(gallery.photos) || gallery.photos.length !== gallery.count) {
         throw new Error(`Invalid snapshot gallery in ${file}: ${gallery?.id || "unknown"}`);
       }
-      removedIDs.delete(gallery.id);
-      galleries.set(gallery.id, gallery);
     }
+    applySnapshotBatch(batch, file, galleries, removedIDs, revisions);
   }
-  return [...galleries.values()];
+  return [...galleries.values()].sort(comparePublishedAt);
 }
 
 async function main() {
@@ -70,7 +67,8 @@ async function main() {
         : {}),
       href: gallery.href || `/album/${gallery.id}`,
       tags: normalized,
-      bucket: bucketId
+      bucket: bucketId,
+      ...(gallery.publishedAt ? { publishedAt: gallery.publishedAt } : {})
     });
     const shardKey = photoShardKey(gallery.id);
     if (!shards.has(shardKey)) shards.set(shardKey, {});
