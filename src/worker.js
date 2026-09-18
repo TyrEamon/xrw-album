@@ -10,6 +10,8 @@ import {
   seedFrom,
   tagsPayload
 } from "./shared.js";
+import { albumSearchSql } from "./search-sql.js";
+import { SearchQueryError } from "../public/search.js";
 
 const MAX_ADMIN_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_DETAIL_BYTES = 1_850_000;
@@ -45,22 +47,8 @@ class D1Store {
 
   async albums({ query = "", tag = "", mode = "all", seed = "default", page = 1, limit = 24 }) {
     const offset = (page - 1) * limit;
-    const countWhere = query
-      ? "WHERE publish_status = 'ok' AND title_lc LIKE ?"
-      : "WHERE publish_status = 'ok'";
-    const listWhere = query
-      ? "WHERE a.publish_status = 'ok' AND a.title_lc LIKE ?"
-      : "WHERE a.publish_status = 'ok'";
-    const params = query ? [`%${query}%`] : [];
-    const totalRow = tag
-      ? await this.db.prepare(`
-          SELECT COUNT(DISTINCT a.id) AS total
-          FROM albums a
-          JOIN album_tags at ON at.album_id = a.id
-          JOIN tags t ON t.id = at.tag_id
-          WHERE a.publish_status = 'ok' AND t.name_lc = ?
-        `).bind(tag).first()
-      : await this.db.prepare(`SELECT COUNT(*) AS total FROM albums ${countWhere}`).bind(...params).first();
+    const { where, params } = albumSearchSql(query, tag);
+    const totalRow = await this.db.prepare(`SELECT COUNT(*) AS total FROM albums a ${where}`).bind(...params).first();
     const total = Number(totalRow?.total || 0);
 
     const order = mode === "recent"
@@ -69,22 +57,11 @@ class D1Store {
         ? "ORDER BY ((a.album_order * ? + ?) % 2147483647), a.album_order"
         : "ORDER BY a.album_order ASC";
     const orderParams = mode === "random" ? [1103515245, seedFrom(seed)] : [];
-    const rows = tag
-      ? await this.db.prepare(`
-          SELECT DISTINCT a.id, a.title, a.count, a.cover, a.href, a.album_order, COALESCE(l.count, 0) AS likes
-          FROM albums a
-          JOIN album_tags at ON at.album_id = a.id
-          JOIN tags t ON t.id = at.tag_id
-          LEFT JOIN likes_albums l ON l.album_id = a.id
-          WHERE a.publish_status = 'ok' AND t.name_lc = ?
-          ${order}
-          LIMIT ? OFFSET ?
-        `).bind(tag, ...orderParams, limit, offset).all()
-      : await this.db.prepare(`
+    const rows = await this.db.prepare(`
           SELECT a.id, a.title, a.count, a.cover, a.href, a.album_order, COALESCE(l.count, 0) AS likes
           FROM albums a
           LEFT JOIN likes_albums l ON l.album_id = a.id
-          ${listWhere}
+          ${where}
           ${order}
           LIMIT ? OFFSET ?
         `).bind(...params, ...orderParams, limit, offset).all();
@@ -691,7 +668,7 @@ export default {
       }
       return env.ASSETS.fetch(request);
     } catch (error) {
-      const status = error instanceof ApiError ? error.status : 500;
+      const status = error instanceof SearchQueryError ? 400 : error instanceof ApiError ? error.status : 500;
       console.error(JSON.stringify({
         level: "error",
         message: error instanceof Error ? error.message : String(error),

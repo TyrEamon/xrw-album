@@ -93,6 +93,12 @@ async function main() {
 
   const search = await getJson("/api/albums?q=VITAMINA&limit=24");
   assert.equal(search.albums[0].cover.includes("telegra.phhttps"), false);
+  const combined = await getJson(`/api/albums?${new URLSearchParams({ q: 'VITAMINA+"VITAMINA" -nonexistentsearchfixture' })}`);
+  assert.equal(combined.total, search.total);
+  const tagOnly = await getJson('/api/albums?tag=nonexistentsearchfixture');
+  assert.equal(tagOnly.total, 0, 'The local preview must not ignore exact tag filters');
+  const malformed = await fetch(`${baseUrl}/api/albums?${new URLSearchParams({ q: '"unfinished' })}`);
+  assert.equal(malformed.status, 400);
 }
 
 try {

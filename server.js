@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseSearch, matchesSearch, SearchQueryError } from "./public/search.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "public");
@@ -41,10 +42,6 @@ for (const album of recentAlbums) {
   });
   runningPhotoTotal += album.count;
 }
-const searchIndex = albums.map((album) => ({
-  album,
-  text: album.title.toLocaleLowerCase()
-}));
 const localTagMap = new Map();
 for (const album of albums) {
   const seen = new Set();
@@ -211,17 +208,18 @@ function homePayload(url) {
 
 function albumsPayload(url) {
   const query = (url.searchParams.get("q") || "").trim().toLocaleLowerCase();
+  const tag = (url.searchParams.get("tag") || "").trim();
+  const terms = parseSearch(query, tag);
   const mode = url.searchParams.get("mode") || "all";
   const seed = url.searchParams.get("seed") || "default";
   const page = Math.max(1, Number(url.searchParams.get("page") || 1));
   const limit = Math.min(48, Math.max(8, Number(url.searchParams.get("limit") || 24)));
-  const matched = query
-    ? searchIndex.filter((entry) => entry.text.includes(query)).map((entry) => entry.album)
-    : mode === "recent"
+  const ordered = mode === "recent"
       ? recentAlbums
       : mode === "random"
         ? shuffledAlbums(seed)
     : albums;
+  const matched = terms.length ? ordered.filter((album) => matchesSearch(album, terms)) : ordered;
   const start = (page - 1) * limit;
 
   return {
@@ -555,6 +553,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   if (url.pathname.startsWith("/api/")) {
     handleApi(req, res, url).catch((error) => {
+      if (error instanceof SearchQueryError) { badRequest(res, error.message); return; }
       console.error(error);
       json(res, 500, { ok: false, error: "Internal server error" });
     });

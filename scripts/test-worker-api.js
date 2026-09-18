@@ -126,6 +126,21 @@ class FakeD1 {
     return Promise.all(statements.map((statement) => statement.run()));
   }
 
+  filterSearch(sql, params) {
+    let rows = [...this.rows];
+    let index = 0;
+    for (const match of sql.matchAll(/a\.title_lc (NOT LIKE|LIKE) \?|a\.id (NOT IN|IN) \( SELECT search_at\.album_id[^?]+\?/g)) {
+      const value = String(params[index++]);
+      if (match[1]) {
+        const text = value.slice(1, -1).replace(/\\([\\%_])/g, "$1");
+        rows = rows.filter((row) => row.title.toLowerCase().includes(text) === (match[1] === "LIKE"));
+      } else {
+        rows = rows.filter((row) => (tagsByAlbum.get(row.id) || []).some((tag) => tag.toLowerCase() === value) === (match[2] === "IN"));
+      }
+    }
+    return rows;
+  }
+
   query(sql, params) {
     if (sql.includes("FROM ( SELECT name_lc FROM tags")) {
       let rows = [...tagRows];
@@ -250,11 +265,7 @@ class FakeD1 {
       sql.includes("SELECT id, title, count, cover, href, album_order") ||
       sql.includes("SELECT a.id, a.title, a.count, a.cover, a.href, a.album_order")
     ) {
-      let rows = [...this.rows];
-      if (sql.includes("title_lc LIKE")) {
-        const term = String(params[0]).replaceAll("%", "");
-        rows = rows.filter((row) => row.title.toLowerCase().includes(term));
-      }
+      let rows = this.filterSearch(sql, params);
       if (sql.includes("ORDER BY a.album_order DESC")) rows.reverse();
       const limit = params.at(-2);
       const offset = params.at(-1);
@@ -270,11 +281,7 @@ class FakeD1 {
     }
 
     if (sql.includes("COUNT(*) AS total FROM albums")) {
-      let rows = [...this.rows];
-      if (sql.includes("title_lc LIKE")) {
-        const term = String(params[0]).replaceAll("%", "");
-        rows = rows.filter((row) => row.title.toLowerCase().includes(term));
-      }
+      const rows = this.filterSearch(sql, params);
       return new FakeD1Result([{ total: rows.length }]);
     }
 

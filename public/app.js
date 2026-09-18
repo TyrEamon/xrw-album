@@ -1,3 +1,5 @@
+import { parseSearch, matchesSearch, quoteSearchValue, searchToFields, buildSearchQuery } from "./search.js?v=20260918-1";
+
 const app = document.querySelector("#app");
 const pendingLikes = new Map();
 
@@ -29,6 +31,8 @@ let searchTimer = null;
 let searchPage = 1;
 let searchQuery = "";
 let searchTag = "";
+let searchRevision = 0;
+let searchControlsAbort = null;
 let tagDirectoryState = null;
 let currentAlbum = null;
 let lightboxIndex = null;
@@ -165,6 +169,7 @@ const icons = {
   moon: lucideIcon("moon", '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/>'),
   sun: lucideIcon("sun", '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>'),
   search: lucideIcon("search", '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>'),
+  filters: lucideIcon("sliders-horizontal", '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>'),
   refresh: lucideIcon("refresh-cw", '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/>'),
   arrow: lucideIcon("arrow-up-right", '<path d="M7 7h10v10M7 17 17 7"/>'),
   back: lucideIcon("chevron-left", '<path d="m15 18-6-6 6-6"/>'),
@@ -497,19 +502,17 @@ async function staticAlbumsResponse(requestUrl) {
   const albums = await staticAlbums();
   const query = (requestUrl.searchParams.get("q") || "").trim().toLocaleLowerCase();
   const tag = (requestUrl.searchParams.get("tag") || "").trim().toLocaleLowerCase();
+  const terms = parseSearch(query, tag);
   const mode = requestUrl.searchParams.get("mode") || "all";
   const seed = requestUrl.searchParams.get("seed") || "default";
   const page = Math.max(1, Number(requestUrl.searchParams.get("page") || 1));
   const limit = Math.min(48, Math.max(8, Number(requestUrl.searchParams.get("limit") || 24)));
-  const matched = tag
-    ? albums.filter((album) => normalizeTags(album.tags).some((name) => name.toLocaleLowerCase() === tag))
-    : query
-      ? albums.filter((album) => album.title.toLocaleLowerCase().includes(query))
-    : mode === "recent"
+  const ordered = mode === "recent"
       ? [...albums].reverse()
       : mode === "random"
         ? staticShuffledAlbums(albums, seed)
         : albums;
+  const matched = terms.length ? ordered.filter((album) => matchesSearch(album, terms)) : ordered;
   const start = (page - 1) * limit;
 
   return {
@@ -844,6 +847,44 @@ function albumCard(album, index, eager = index < 8) {
   `;
 }
 
+function searchBoxTemplate() {
+  const value = [searchQuery, searchTag ? `tag:${quoteSearchValue(searchTag)}` : ""].filter(Boolean).join(" ");
+  return `
+    <div class="search-control" role="search" aria-label="搜索图集">
+      <div class="search-box">
+        ${icons.search}
+        <input id="album-search" class="search-input" name="q" type="search" placeholder="搜索图集，空格分隔关键词"
+          aria-label="搜索图集标题或用 tag: 指定标签" aria-describedby="search-tips" maxlength="512"
+          value="${escapeHtml(value)}" autocomplete="off" enterkeyhint="search">
+        <button type="button" class="search-filter-toggle" data-search-filters aria-label="高级搜索"
+          aria-expanded="false" aria-controls="advanced-search" title="高级搜索">${icons.filters}</button>
+      </div>
+      <div class="search-panel" data-search-panel data-lenis-prevent hidden>
+        <div class="search-tips" id="search-tips">
+          <p class="search-tips-heading">高级搜索 <span>SEARCH TIPS</span></p>
+          <p><code>神楽坂真冬 护士</code><span>标题同时包含，顺序不限</span></p>
+          <p><code>\"完整短语\"</code><span>连续匹配</span><code>-口罩</code><span>排除关键词</span></p>
+          <p><code>tag:护士</code><span>只匹配完整标签</span></p>
+          <p class="search-tips-note">标签带空格时加引号，如 tag:\"Bao Ji Shao Nu\"。也支持 + 连接关键词。</p>
+        </div>
+        <form id="advanced-search" class="advanced-search" data-search-form hidden>
+          <div class="search-fields">
+            <label>包含关键词<input name="all" type="text" placeholder="神楽坂真冬 护士" autocomplete="off" maxlength="512"></label>
+            <label>完整短语<input name="phrase" type="text" placeholder="按原文连续匹配" autocomplete="off" maxlength="512"></label>
+            <label>排除关键词<input name="exclude" type="text" placeholder="口罩 黑丝" autocomplete="off" maxlength="512"></label>
+            <label>指定标签<input name="tags" type="text" placeholder='护士 或 "Bao Ji Shao Nu"' autocomplete="off" maxlength="512"></label>
+          </div>
+          <p class="search-form-note">所有条件同时满足；多个标签也需同时具备。</p>
+          <p class="search-form-error" data-search-form-error role="alert" hidden></p>
+          <div class="search-form-actions">
+            <button type="button" class="search-reset" data-search-reset>清空条件</button>
+            <button type="submit" class="search-apply">${icons.search}<span>应用搜索</span></button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+
 function headerTemplate(manifest) {
   const hasAlbumCount = manifest.albumCount !== null
     && manifest.albumCount !== undefined
@@ -856,12 +897,7 @@ function headerTemplate(manifest) {
         <span class="brand-title">绮影志</span>
         <span class="brand-sub">VELVET ARCHIVE</span>
       </div>
-      ${isTagsPage ? '<span class="header-center-spacer" aria-hidden="true"></span>' : `
-        <label class="search-box">
-          ${icons.search}
-          <input class="search-input" name="q" type="search" placeholder="搜索图集" value="${escapeHtml(searchTag || searchQuery)}" autocomplete="off">
-        </label>
-      `}
+      ${isTagsPage ? '<span class="header-center-spacer" aria-hidden="true"></span>' : searchBoxTemplate()}
       <div class="header-actions">
         <button type="button" class="tag-directory-link ${appPathname() === "/tags" ? "active" : ""}" data-tags-page>
           <span>标签</span>
@@ -1175,8 +1211,9 @@ function errorPanel(error) {
 }
 
 async function renderHome() {
-  searchTag = (new URLSearchParams(location.search).get("tag") || "").trim();
-  if (searchTag) searchQuery = "";
+  const searchParams = new URLSearchParams(location.search);
+  searchTag = (searchParams.get("tag") || "").trim();
+  searchQuery = (searchParams.get("q") || "").trim();
   if (!homeManifest) {
     app.innerHTML = pendingHomeTemplate();
     bindThemeButtons(app);
@@ -1527,19 +1564,104 @@ function bindHomeControls() {
     if (activeTab === "photos" && !searchQuery && !searchTag) renderTabGrid({ force: true });
   });
 
-  const input = app.querySelector(".search-input");
-  input.addEventListener("input", () => {
-    if (searchTag) {
-      searchTag = "";
-      history.replaceState({}, "", appUrl("/"));
+  bindSearchControls();
+}
+
+function bindSearchControls() {
+  searchControlsAbort?.abort();
+  searchControlsAbort = new AbortController();
+  const { signal } = searchControlsAbort;
+  const root = app.querySelector(".search-control");
+  const input = root.querySelector(".search-input");
+  const panel = root.querySelector("[data-search-panel]");
+  const toggle = root.querySelector("[data-search-filters]");
+  const form = root.querySelector("[data-search-form]");
+  const formError = root.querySelector("[data-search-form-error]");
+  let composing = false;
+  let restoringFocus = false;
+
+  const close = () => {
+    panel.hidden = true;
+    form.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+  };
+  const fillFields = () => {
+    formError.hidden = true;
+    try {
+      const fields = searchToFields(input.value);
+      for (const [name, value] of Object.entries(fields)) form.elements.namedItem(name).value = value;
+    } catch (error) {
+      // Preserve unfinished syntax so opening filters never discards user input.
+      form.reset();
+      form.elements.namedItem("all").value = input.value;
     }
-    searchQuery = input.value.trim();
+  };
+  const submit = () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(async () => {
-      if (searchQuery) await runSearch(1);
-      else await showActiveTab();
-    }, 220);
-  });
+    searchQuery = input.value.trim();
+    searchTag = "";
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("q", searchQuery);
+    history.replaceState({}, "", appUrl(`/${params.size ? `?${params}` : ""}`));
+    return runSearch(1);
+  };
+  root.addEventListener("focusin", () => { if (!restoringFocus) panel.hidden = false; }, { signal });
+  input.addEventListener("click", () => { panel.hidden = false; }, { signal });
+  root.addEventListener("focusout", (event) => { if (!root.contains(event.relatedTarget)) close(); }, { signal });
+  document.addEventListener("pointerdown", (event) => { if (!root.contains(event.target)) close(); }, { signal });
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || panel.hidden) return;
+    event.preventDefault();
+    close();
+    restoringFocus = true;
+    input.focus({ preventScroll: true });
+    restoringFocus = false;
+  }, { signal });
+  toggle.addEventListener("click", () => {
+    const open = form.hidden;
+    panel.hidden = false;
+    form.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) { fillFields(); form.elements.namedItem("all").focus(); }
+  }, { signal });
+  const schedule = () => {
+    if (composing) return;
+    searchRevision += 1; // Invalidate the previous query even during the debounce.
+    clearTimeout(searchTimer);
+    if (!form.hidden) fillFields();
+    searchTimer = setTimeout(submit, 300);
+  };
+  input.addEventListener("input", schedule, { signal });
+  input.addEventListener("compositionstart", () => { composing = true; clearTimeout(searchTimer); searchRevision += 1; }, { signal });
+  input.addEventListener("compositionend", () => { composing = false; schedule(); }, { signal });
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.isComposing || composing) return;
+    event.preventDefault();
+    close();
+    submit();
+  }, { signal });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    try {
+      input.value = buildSearchQuery(Object.fromEntries(new FormData(form)));
+    } catch (error) {
+      formError.textContent = error.message;
+      formError.hidden = false;
+      return;
+    }
+    close();
+    restoringFocus = true;
+    toggle.focus({ preventScroll: true });
+    restoringFocus = false;
+    submit();
+  }, { signal });
+  root.querySelector("[data-search-reset]").addEventListener("click", () => {
+    form.reset();
+    formError.hidden = true;
+    input.value = "";
+    form.elements.namedItem("all").focus();
+    submit();
+  }, { signal });
 }
 
 async function showActiveTab() {
@@ -2267,6 +2389,7 @@ function renderHomePhotoGridOnResize() {
 }
 
 async function runSearch(page) {
+  const revision = ++searchRevision;
   const results = app.querySelector("#search-results");
   const tabsContainer = app.querySelector("#home-tabs");
   if (!results || !tabsContainer) return;
@@ -2299,10 +2422,21 @@ async function runSearch(page) {
     </section>
   `;
 
-  const filterParam = searchTag
-    ? `tag=${encodeURIComponent(searchTag)}`
-    : `q=${encodeURIComponent(searchQuery)}`;
-  const data = await getJson(`/api/albums?${filterParam}&page=${page}&limit=24`);
+  let terms;
+  let data;
+  try {
+    terms = parseSearch(searchQuery, searchTag);
+    const params = new URLSearchParams({ q: searchQuery, tag: searchTag, page, limit: 24 });
+    data = await getJson(`/api/albums?${params}`);
+  } catch (error) {
+    if (revision !== searchRevision || !results.isConnected) return;
+    results.innerHTML = `<section class="home-section home-section-first"><h2 class="section-title">搜索暂未完成</h2>
+      <p class="search-error" role="alert">${escapeHtml(error.message === "Failed to fetch" ? "网络请求中断，请重试。" : error.message)}</p>
+      <button class="more-btn" type="button" data-search-retry>重新搜索</button></section>`;
+    results.querySelector("[data-search-retry]").addEventListener("click", () => runSearch(1));
+    return;
+  }
+  if (revision !== searchRevision || !results.isConnected) return;
   const hasMore = data.page * data.limit < data.total;
   results.innerHTML = `
     <section class="home-section home-section-first">
@@ -2312,7 +2446,9 @@ async function runSearch(page) {
           <p class="section-sub">${formatCount(data.total)} Matches</p>
         </div>
       </div>
-      ${data.albums.length ? `<div class="albums-grid">${data.albums.map(albumCard).join("")}</div>` : '<div class="empty-state">No Matches</div>'}
+      <div class="search-conditions" aria-label="当前搜索条件">${terms.map((term) =>
+        `<span class="search-condition${term.exclude ? " is-excluded" : ""}">${term.exclude ? (term.field === "tag" ? "排除标签" : "排除") : term.field === "tag" ? "标签" : "标题"} · ${escapeHtml(term.value)}</span>`).join("")}</div>
+      ${data.albums.length ? `<div class="albums-grid">${data.albums.map(albumCard).join("")}</div>` : '<div class="empty-state">没有找到同时满足条件的图集，试试减少关键词或排除条件。</div>'}
       ${hasMore ? '<div class="home-footer"><button type="button" class="more-btn" data-more>更多</button></div>' : ""}
     </section>
   `;
@@ -2325,20 +2461,27 @@ async function appendSearch() {
   const results = app.querySelector("#search-results");
   const grid = results?.querySelector(".albums-grid");
   const more = results?.querySelector("[data-more]");
-  if (!grid || !more) return;
+  if (!grid || !more || more.disabled) return;
 
+  const revision = searchRevision;
+  more.disabled = true;
   more.textContent = "加载中";
   const nextPage = searchPage + 1;
-  const filterParam = searchTag
-    ? `tag=${encodeURIComponent(searchTag)}`
-    : `q=${encodeURIComponent(searchQuery)}`;
-  const data = await getJson(`/api/albums?${filterParam}&page=${nextPage}&limit=24`);
+  let data;
+  try {
+    const params = new URLSearchParams({ q: searchQuery, tag: searchTag, page: nextPage, limit: 24 });
+    data = await getJson(`/api/albums?${params}`);
+  } catch {
+    if (more.isConnected) { more.disabled = false; more.textContent = "加载失败，点击重试"; }
+    return;
+  }
+  if (revision !== searchRevision || !grid.isConnected) return;
   searchPage = nextPage;
   grid.insertAdjacentHTML("beforeend", data.albums.map((album, index) => albumCard(album, grid.children.length + index)).join(""));
   bindAlbumCards(grid);
   markLoadedImages(grid);
   if (data.page * data.limit >= data.total) more.remove();
-  else more.textContent = "更多";
+  else { more.disabled = false; more.textContent = "更多"; }
 }
 
 function detailTemplate(data) {
@@ -2814,6 +2957,9 @@ function navigate(path) {
 }
 
 async function route() {
+  clearTimeout(searchTimer);
+  searchRevision += 1;
+  searchControlsAbort?.abort();
   window.removeEventListener("resize", renderDetailRowsOnResize);
   infiniteObserver?.disconnect();
   closeLightbox();
