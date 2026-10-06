@@ -178,24 +178,34 @@ function countUniqueSnapshotTags(snapshotGalleries) {
 }
 
 async function loadAlbumViews() {
+  const empty = { albums: new Map(), visitors: 0, pageviews: 0 };
   try {
     const raw = JSON.parse(await fs.readFile(viewsPath, "utf8"));
-    const entries = Array.isArray(raw) ? raw : Object.entries(raw).map(([id, views]) => ({ id, views }));
-    const views = new Map();
+    const entries = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.albums)
+        ? raw.albums
+        : Object.entries(raw || {}).map(([id, views]) => ({ id, views }));
+    const albums = new Map();
     for (const entry of entries) {
       const id = String(entry?.id || "").trim();
       const count = Number(entry?.views);
-      if (id && Number.isFinite(count) && count > 0) views.set(id, count);
+      if (id && Number.isFinite(count) && count > 0) albums.set(id, count);
     }
-    return views;
+    return {
+      albums,
+      visitors: Number(raw?.visitors) || 0,
+      pageviews: Number(raw?.pageviews) || 0
+    };
   } catch (error) {
     // 缺文件是正常情况（没配 Umami 分享链接），此时前端「热度」退化成纯随机。
     if (error.code !== "ENOENT") console.warn(`Album views unavailable: ${error.message}`);
-    return new Map();
+    return empty;
   }
 }
 
-async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes, views) {
+async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes, analytics) {
+  const views = analytics.albums;
   const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
   const albums = new Map(baseAlbums.filter((album) => !removedIDs.has(album.id)).map((album) => [album.id, {
     ...album,
@@ -227,7 +237,8 @@ async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes,
     photoCount: combined.reduce((count, album) => count + album.count, 0),
     maxPhotosPerAlbum: combined.reduce((maximum, album) => Math.max(maximum, album.count), 0),
     snapshotAlbumCount: snapshotGalleries.length,
-    tagCount: countUniqueSnapshotTags(snapshotGalleries)
+    tagCount: countUniqueSnapshotTags(snapshotGalleries),
+    ...(analytics.visitors > 0 ? { visitors: analytics.visitors, pageviews: analytics.pageviews } : {})
   };
   await fs.writeFile(path.join(outDir, "data/albums.json"), `${JSON.stringify(combined)}\n`);
   await fs.writeFile(path.join(outDir, "data/manifest.json"), `${JSON.stringify(manifest)}\n`);
@@ -263,9 +274,9 @@ async function main() {
   await copyDir(path.join(rootDir, "public"), outDir);
   await fs.mkdir(path.join(outDir, "data"), { recursive: true });
   const { galleries: snapshotGalleries, removedIDs } = await loadSnapshotGalleries();
-  const albumViews = await loadAlbumViews();
+  const analytics = await loadAlbumViews();
   const shardStats = await writePhotoShards(snapshotGalleries, removedIDs);
-  await writeAlbumsAndManifest(snapshotGalleries, removedIDs, shardStats.coverSizes, albumViews);
+  await writeAlbumsAndManifest(snapshotGalleries, removedIDs, shardStats.coverSizes, analytics);
 
   const indexPath = path.join(outDir, "index.html");
   const html = await fs.readFile(indexPath, "utf8");
@@ -283,7 +294,8 @@ async function main() {
   console.log(`Unique tags: ${countUniqueSnapshotTags(snapshotGalleries)}`);
   console.log(`GitHub image proxy: ${githubImageBase || "disabled"}`);
   console.log(`External data sources: ${externalDataSources.map((source) => source.id).join(", ") || "none"}`);
-  console.log(`Albums with view counts: ${albumViews.size}`);
+  console.log(`Albums with view counts: ${analytics.albums.size}`);
+  console.log(`Site visitors: ${analytics.visitors}`);
 }
 
 main().catch((error) => {

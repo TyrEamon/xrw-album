@@ -44,19 +44,34 @@ async function main() {
   const token = String(share?.token || "");
   if (!websiteId || !token) throw new Error("Umami share response is missing websiteId or token");
 
+  const headers = {
+    "x-umami-share-token": token,
+    "x-umami-share-context": "1"
+  };
   const endAt = Date.now();
-  const startAt = endAt - windowDays * 24 * 60 * 60 * 1000;
-  const query = new URLSearchParams({
-    startAt: String(startAt),
+
+  // 图包排名看的是「最近」的热度，所以取窗口内的路径计数。
+  const windowQuery = new URLSearchParams({
+    startAt: String(endAt - windowDays * 24 * 60 * 60 * 1000),
     endAt: String(endAt),
     type: "path",
     limit: String(pathLimit),
     timezone: "Asia/Shanghai"
   });
-  const metrics = await fetchJson(`${baseUrl}/api/websites/${websiteId}/metrics?${query}`, {
-    "x-umami-share-token": token,
-    "x-umami-share-context": "1"
+  const metrics = await fetchJson(`${baseUrl}/api/websites/${websiteId}/metrics?${windowQuery}`, headers);
+
+  // 顶栏那个数字和图集总数并列，是累计值，所以取全部时间。
+  const totalQuery = new URLSearchParams({
+    startAt: "0",
+    endAt: String(endAt),
+    unit: "day",
+    timezone: "Asia/Shanghai"
   });
+  const totals = await fetchJson(`${baseUrl}/api/websites/${websiteId}/stats?${totalQuery}`, headers)
+    .catch((error) => {
+      console.warn(`Site totals unavailable: ${error.message}`);
+      return null;
+    });
 
   const views = new Map();
   for (const row of Array.isArray(metrics) ? metrics : []) {
@@ -66,11 +81,18 @@ async function main() {
     views.set(id, (views.get(id) || 0) + count);
   }
 
-  const payload = [...views.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .map(([id, count]) => ({ id, views: count }));
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    windowDays,
+    visitors: Number(totals?.visitors) || 0,
+    pageviews: Number(totals?.pageviews) || 0,
+    albums: [...views.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .map(([id, count]) => ({ id, views: count }))
+  };
   await fs.writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
-  console.log(`Album view counts: ${payload.length} albums from the last ${windowDays} days`);
+  console.log(`Album view counts: ${payload.albums.length} albums from the last ${windowDays} days`);
+  console.log(`Site totals: ${payload.visitors} visitors, ${payload.pageviews} pageviews`);
 }
 
 main().catch((error) => {

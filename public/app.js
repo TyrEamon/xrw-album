@@ -263,7 +263,9 @@ async function staticGetJson(url, options = {}) {
       albumCount: manifest.albumCount,
       photoCount: manifest.photoCount,
       tagCount: Number(manifest.tagCount) || 0,
-      builtAt: manifest.builtAt
+      builtAt: manifest.builtAt,
+      visitors: Number(manifest.visitors) || 0,
+      pageviews: Number(manifest.pageviews) || 0
     };
   }
 
@@ -920,6 +922,9 @@ function headerTemplate(manifest) {
   const hasAlbumCount = manifest.albumCount !== null
     && manifest.albumCount !== undefined
     && Number.isFinite(Number(manifest.albumCount));
+  // 有 Umami 数据就顶栏显示累计访客，没有就退回图集总数，避免出现空白或 0。
+  const visitorCount = Number(manifest.visitors);
+  const hasVisitors = Number.isFinite(visitorCount) && visitorCount > 0;
   const isTagsPage = appPathname() === "/tags";
   return `
     <header class="home-header">
@@ -934,7 +939,9 @@ function headerTemplate(manifest) {
           <span>标签</span>
           ${Number(manifest.tagCount) ? `<span class="tag-directory-count">${formatCount(manifest.tagCount)}</span>` : ""}
         </button>
-        <span class="archive-count">${hasAlbumCount ? formatCount(manifest.albumCount) : "--"} Sets</span>
+        <span class="archive-count">${hasVisitors
+          ? `${formatCount(visitorCount)} 访客`
+          : `${hasAlbumCount ? formatCount(manifest.albumCount) : "--"} Sets`}</span>
         ${themeButton()}
       </div>
     </header>
@@ -1241,6 +1248,17 @@ function errorPanel(error) {
   });
 }
 
+function manifestFromHealth(health) {
+  return {
+    albumCount: health.albumCount,
+    photoCount: health.photoCount,
+    tagCount: Number(health.tagCount) || 0,
+    builtAt: health.builtAt,
+    visitors: Number(health.visitors) || 0,
+    pageviews: Number(health.pageviews) || 0
+  };
+}
+
 async function renderHome() {
   const searchParams = new URLSearchParams(location.search);
   searchTag = (searchParams.get("tag") || "").trim();
@@ -1249,12 +1267,7 @@ async function renderHome() {
     app.innerHTML = pendingHomeTemplate();
     bindThemeButtons(app);
     const health = await getJson("/api/health");
-    homeManifest = {
-      albumCount: health.albumCount,
-      photoCount: health.photoCount,
-      tagCount: Number(health.tagCount) || 0,
-      builtAt: health.builtAt
-    };
+    homeManifest = manifestFromHealth(health);
   }
   tabs.photos.total ||= homeManifest.photoCount;
   tabs.recent.total ||= homeManifest.albumCount;
@@ -1438,12 +1451,7 @@ async function loadTagDirectory(reset = false) {
 async function renderTagsPage() {
   if (!homeManifest) {
     const health = await getJson("/api/health");
-    homeManifest = {
-      albumCount: health.albumCount,
-      photoCount: health.photoCount,
-      tagCount: Number(health.tagCount) || 0,
-      builtAt: health.builtAt
-    };
+    homeManifest = manifestFromHealth(health);
   }
   const params = new URLSearchParams(location.search);
   const requestedGroup = (params.get("group") || "").trim();
