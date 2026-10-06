@@ -113,7 +113,7 @@ function createTabsState() {
       prefetchKey: "",
       prefetchPromise: null,
       scope: "album",
-      mode: "random",
+      mode: "hot",
       seed: String(Date.now()),
       photoLayoutKey: ""
     },
@@ -179,7 +179,8 @@ const icons = {
   image: lucideIcon("image", '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>'),
   images: lucideIcon("images", '<path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/>'),
   list: lucideIcon("list-ordered", '<path d="M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>'),
-  shuffle: lucideIcon("shuffle", '<path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h1.5a6.5 6.5 0 0 0 5.15-2.52L15.35 6A6.5 6.5 0 0 1 20.5 3H22M2 6h1.5a6.5 6.5 0 0 1 5.15 2.52l.57.81"/>')
+  shuffle: lucideIcon("shuffle", '<path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h1.5a6.5 6.5 0 0 0 5.15-2.52L15.35 6A6.5 6.5 0 0 1 20.5 3H22M2 6h1.5a6.5 6.5 0 0 1 5.15 2.52l.57.81"/>'),
+  flame: lucideIcon("flame", '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5"/>')
 };
 
 function escapeHtml(value) {
@@ -498,6 +499,32 @@ function staticShuffledAlbums(albums, seedValue) {
   return result;
 }
 
+const hotAlbumLimit = 12;
+
+// 热度模式：浏览量最高的若干图包排在最前，其余照常打乱后跟在后面。
+// 只按浏览量降序会把绝大多数零浏览量的图包挤成并列，所以尾部仍然洗牌。
+function staticPopularAlbums(albums, seedValue) {
+  const seed = String(seedValue || "default");
+  const key = `hot:${seed}`;
+  if (staticData.randomAlbums.has(key)) return staticData.randomAlbums.get(key);
+
+  const ranked = albums
+    .filter((album) => Number(album.views) > 0)
+    .sort((left, right) => Number(right.views) - Number(left.views) || String(left.id).localeCompare(String(right.id)))
+    .slice(0, hotAlbumLimit);
+  const head = new Set(ranked.map((album) => album.id));
+  const tail = staticShuffledAlbums(
+    albums.filter((album) => !head.has(album.id)),
+    `hot-tail:${seed}`
+  );
+  const result = [...ranked, ...tail];
+  staticData.randomAlbums.set(key, result);
+  while (staticData.randomAlbums.size > 8) {
+    staticData.randomAlbums.delete(staticData.randomAlbums.keys().next().value);
+  }
+  return result;
+}
+
 async function staticAlbumsResponse(requestUrl) {
   const albums = await staticAlbums();
   const query = (requestUrl.searchParams.get("q") || "").trim().toLocaleLowerCase();
@@ -527,13 +554,15 @@ async function staticAlbumsResponse(requestUrl) {
 }
 
 async function staticPhotoOffsets(mode = "sequence", seedValue = "photos") {
-  const key = mode === "random" ? `random:${seedValue}` : "sequence";
+  const key = mode === "sequence" ? "sequence" : `${mode}:${seedValue}`;
   if (staticData.photoOffsets.has(key)) return staticData.photoOffsets.get(key);
 
   const albums = await staticAlbums();
   const orderedAlbums = mode === "random"
     ? staticShuffledAlbums(albums, `photos:${seedValue}`)
-    : [...albums].reverse();
+    : mode === "hot"
+      ? staticPopularAlbums(albums, seedValue)
+      : [...albums].reverse();
   let running = 0;
   const offsets = orderedAlbums.map((album) => {
     const entry = {
@@ -614,7 +643,7 @@ async function staticPhotoFromOffset(offset, mode = "sequence", seedValue = "pho
 async function staticPhotosResponse(requestUrl) {
   const manifest = await staticManifest();
   const requestedMode = requestUrl.searchParams.get("mode");
-  const mode = requestedMode === "random" ? "random" : "sequence";
+  const mode = requestedMode === "random" || requestedMode === "hot" ? requestedMode : "sequence";
   const scope = requestUrl.searchParams.get("scope") === "album" ? "album" : "all";
   const seed = requestUrl.searchParams.get("seed") || "photos";
   const page = Math.max(1, Number(requestUrl.searchParams.get("page") || 1));
@@ -623,7 +652,9 @@ async function staticPhotosResponse(requestUrl) {
   const orderedAlbums = scope === "album"
     ? mode === "random"
       ? staticShuffledAlbums(albums, `album-previews:${seed}`)
-      : [...albums].reverse()
+      : mode === "hot"
+        ? staticPopularAlbums(albums, `album-previews:${seed}`)
+        : [...albums].reverse()
     : null;
   const total = scope === "album" ? orderedAlbums.length : manifest.photoCount || 0;
   const start = (page - 1) * limit;
@@ -1037,7 +1068,7 @@ function heroTemplate(manifest) {
 
 function resetPhotosState({
   scope = tabs.photos.scope || "album",
-  mode = tabs.photos.mode || "random"
+  mode = tabs.photos.mode || "hot"
 } = {}) {
   tabs.photos = {
     photos: [],
@@ -1054,7 +1085,7 @@ function resetPhotosState({
     prefetchPromise: null,
     scope,
     mode,
-    seed: mode === "random" ? String(Date.now()) : "photos",
+    seed: mode === "sequence" ? "photos" : String(Date.now()),
     photoLayoutKey: ""
   };
 }
@@ -1331,6 +1362,9 @@ function photoBrowseControlsTemplate() {
         <button type="button" class="photo-control-button ${tabs.photos.mode === "random" ? "active" : ""}" data-photo-mode="random" aria-pressed="${tabs.photos.mode === "random"}" title="重新随机排列">
           ${icons.shuffle}<span>随机</span>
         </button>
+        <button type="button" class="photo-control-button ${tabs.photos.mode === "hot" ? "active" : ""}" data-photo-mode="hot" aria-pressed="${tabs.photos.mode === "hot"}" title="访问量最高的图集排在前面，其余随机">
+          ${icons.flame}<span>热度</span>
+        </button>
       </div>
     </div>
   `;
@@ -1526,8 +1560,10 @@ function bindHomeControls() {
 
   app.querySelectorAll("[data-photo-mode]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const nextMode = button.dataset.photoMode === "random" ? "random" : "sequence";
-      if (tabs.photos.mode === nextMode && nextMode !== "random") return;
+      const nextMode = ["sequence", "random", "hot"].includes(button.dataset.photoMode)
+        ? button.dataset.photoMode
+        : "sequence";
+      if (tabs.photos.mode === nextMode && nextMode === "sequence") return;
 
       activeTab = "photos";
       resetPhotosState({ mode: nextMode });

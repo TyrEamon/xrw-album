@@ -10,11 +10,14 @@ npm-debug.log*
 !.dev.vars.example
 
 data/likes.json
+data/views.json
 data/d1-*.sql
 publisher/publisher.db*
 publisher/work/
 publisher/bin/
 publisher/.secrets/
+publisher/local-uploader.env
+publisher/local-uploader-data/
 .wrangler/
 dist-worker-dry-run/
 dist-gh-pages/

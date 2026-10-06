@@ -27,6 +27,9 @@ const externalDataSources = String(process.env.EXTERNAL_DATA_SOURCES || "")
     if (parsed.protocol !== "https:") throw new Error(`External data source must use HTTPS: ${id}`);
     return { id, base };
   });
+const viewsPath = process.env.UMAMI_VIEWS_FILE
+  ? path.resolve(rootDir, process.env.UMAMI_VIEWS_FILE)
+  : path.join(rootDir, "data/views.json");
 
 function rewriteGitHubImageUrl(value) {
   if (!githubImageBase || typeof value !== "string" || value === "") return value;
@@ -174,7 +177,25 @@ function countUniqueSnapshotTags(snapshotGalleries) {
   return unique.size;
 }
 
-async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes) {
+async function loadAlbumViews() {
+  try {
+    const raw = JSON.parse(await fs.readFile(viewsPath, "utf8"));
+    const entries = Array.isArray(raw) ? raw : Object.entries(raw).map(([id, views]) => ({ id, views }));
+    const views = new Map();
+    for (const entry of entries) {
+      const id = String(entry?.id || "").trim();
+      const count = Number(entry?.views);
+      if (id && Number.isFinite(count) && count > 0) views.set(id, count);
+    }
+    return views;
+  } catch (error) {
+    // 缺文件是正常情况（没配 Umami 分享链接），此时前端「热度」退化成纯随机。
+    if (error.code !== "ENOENT") console.warn(`Album views unavailable: ${error.message}`);
+    return new Map();
+  }
+}
+
+async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes, views) {
   const baseAlbums = JSON.parse(await fs.readFile(path.join(rootDir, "data/albums.json"), "utf8"));
   const albums = new Map(baseAlbums.filter((album) => !removedIDs.has(album.id)).map((album) => [album.id, {
     ...album,
@@ -193,7 +214,11 @@ async function writeAlbumsAndManifest(snapshotGalleries, removedIDs, coverSizes)
       ...(gallery.publishedAt ? { publishedAt: gallery.publishedAt } : {})
     });
   }
-  const combined = [...albums.values()].sort(comparePublishedAt).map((album, order) => ({ ...album, order }));
+  const combined = [...albums.values()]
+    .sort(comparePublishedAt)
+    .map((album, order) => (views.has(album.id)
+      ? { ...album, order, views: views.get(album.id) }
+      : { ...album, order }));
   const baseManifest = JSON.parse(await fs.readFile(path.join(rootDir, "data/manifest.json"), "utf8"));
   const manifest = {
     ...baseManifest,
@@ -238,8 +263,9 @@ async function main() {
   await copyDir(path.join(rootDir, "public"), outDir);
   await fs.mkdir(path.join(outDir, "data"), { recursive: true });
   const { galleries: snapshotGalleries, removedIDs } = await loadSnapshotGalleries();
+  const albumViews = await loadAlbumViews();
   const shardStats = await writePhotoShards(snapshotGalleries, removedIDs);
-  await writeAlbumsAndManifest(snapshotGalleries, removedIDs, shardStats.coverSizes);
+  await writeAlbumsAndManifest(snapshotGalleries, removedIDs, shardStats.coverSizes, albumViews);
 
   const indexPath = path.join(outDir, "index.html");
   const html = await fs.readFile(indexPath, "utf8");
@@ -257,6 +283,7 @@ async function main() {
   console.log(`Unique tags: ${countUniqueSnapshotTags(snapshotGalleries)}`);
   console.log(`GitHub image proxy: ${githubImageBase || "disabled"}`);
   console.log(`External data sources: ${externalDataSources.map((source) => source.id).join(", ") || "none"}`);
+  console.log(`Albums with view counts: ${albumViews.size}`);
 }
 
 main().catch((error) => {
