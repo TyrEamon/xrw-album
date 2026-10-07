@@ -190,6 +190,19 @@ img {
   align-items: baseline;
   gap: 14px;
   min-width: 0;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.brand:hover,
+.brand:focus-visible {
+  color: var(--accent);
+}
+
+.brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 2px;
 }
 
 .brand-mark {
@@ -1636,6 +1649,12 @@ img {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+}
+
+.back-to-top.is-clear-search {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
 }
 
 .back-to-top:hover,

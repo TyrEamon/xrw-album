@@ -23,12 +23,12 @@ try {
     const output = path.join(fixture, "dist-gh-pages");
     const html = await fs.readFile(path.join(output, "index.html"), "utf8");
     const prefix = base === "/" ? "" : "/xrw-album";
-    assert.ok(html.includes(`src="${prefix}/app.js?v=20260918-1"`));
-    assert.ok(html.includes(`href="${prefix}/styles.css?v=20260918-1"`));
+    assert.ok(html.includes(`src="${prefix}/app.js?v=20260918-3"`));
+    assert.ok(html.includes(`href="${prefix}/styles.css?v=20260918-3"`));
     assert.ok(html.includes(`window.__XRW_STATIC_DATA_BASE = "${prefix}/data"`));
     assert.equal(await fs.readFile(path.join(output, "search.js"), "utf8"), await fs.readFile(path.join(root, "public/search.js"), "utf8"));
     const js = await fs.readFile(path.join(output, "app.js"), "utf8");
-    assert.match(js, /from "\.\/search\.js\?v=20260918-1"/);
+    assert.match(js, /from "\.\/search\.js\?v=20260918-2"/);
     assert.equal(await fs.readFile(path.join(output, "404.html"), "utf8"), html);
   }
 } finally {

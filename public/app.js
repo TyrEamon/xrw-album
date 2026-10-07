@@ -1,4 +1,4 @@
-import { parseSearch, matchesSearch, quoteSearchValue, searchToFields, buildSearchQuery } from "./search.js?v=20260918-1";
+import { parseSearch, matchesSearch, quoteSearchValue, searchToFields, buildSearchQuery } from "./search.js?v=20260918-2";
 
 const app = document.querySelector("#app");
 const pendingLikes = new Map();
@@ -175,6 +175,7 @@ const icons = {
   back: lucideIcon("chevron-left", '<path d="m15 18-6-6 6-6"/>'),
   heart: lucideIcon("heart", '<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>'),
   up: lucideIcon("arrow-up", '<path d="m5 12 7-7 7 7M12 19V5"/>'),
+  clearSearch: lucideIcon("search-x", '<path d="m13.5 8.5-5 5"/><path d="m8.5 8.5 5 5"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>'),
   sort: lucideIcon("arrow-up-down", '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>'),
   image: lucideIcon("image", '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>'),
   images: lucideIcon("images", '<path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="m22 13-1.296-1.296a2.41 2.41 0 0 0-3.408 0L11 18"/><circle cx="12" cy="8" r="2"/><rect width="16" height="16" x="6" y="2" rx="2"/>'),
@@ -928,11 +929,11 @@ function headerTemplate(manifest) {
   const isTagsPage = appPathname() === "/tags";
   return `
     <header class="home-header">
-      <div class="brand" aria-label="绮影志 VELVET ARCHIVE">
+      <button type="button" class="brand" aria-label="绮影志 VELVET ARCHIVE" title="返回首页" data-brand-home>
         <span class="brand-mark"></span>
         <span class="brand-title">绮影志</span>
         <span class="brand-sub">VELVET ARCHIVE</span>
-      </div>
+      </button>
       ${isTagsPage ? '<span class="header-center-spacer" aria-hidden="true"></span>' : searchBoxTemplate()}
       <div class="header-actions">
         <button type="button" class="tag-directory-link ${appPathname() === "/tags" ? "active" : ""}" data-tags-page>
@@ -1197,19 +1198,44 @@ function pendingHomeTemplate() {
   `;
 }
 
+// 首页搜索态（/ 且带 q/tag）下，回顶按钮兼职“清除搜索回首页”。/tags?q= 与图集详情页不受影响。
+function isHomeSearchActive() {
+  return appPathname() === "/" && Boolean(searchQuery || searchTag);
+}
+
 function backToTopButton() {
-  return `<button type="button" class="back-to-top" data-back-to-top aria-label="回到顶部" title="回到顶部">${icons.up}</button>`;
+  const clearing = isHomeSearchActive();
+  const label = clearing ? "清除搜索并回到首页顶部" : "回到顶部";
+  return `<button type="button" class="back-to-top${clearing ? " is-clear-search" : ""}" data-back-to-top data-mode="${clearing ? "clear" : "top"}" aria-label="${label}" title="${label}">${clearing ? icons.clearSearch : icons.up}</button>`;
 }
 
 function bindBackToTop() {
   app.querySelector("[data-back-to-top]")?.addEventListener("click", () => {
+    if (isHomeSearchActive()) {
+      // 清空 q/tag 回到干净首页：navigate 按 BASE_PATH 处理子路径，再直接置顶。
+      navigate("/");
+      scrollPageToTop(true);
+      return;
+    }
     scrollPageToTop();
   });
   syncBackToTop();
 }
 
 function syncBackToTop() {
-  app.querySelector("[data-back-to-top]")?.classList.toggle("is-visible", window.scrollY > Math.max(500, window.innerHeight * 0.75));
+  const button = app.querySelector("[data-back-to-top]");
+  if (!button) return;
+  const clearing = isHomeSearchActive();
+  const mode = clearing ? "clear" : "top";
+  if (button.dataset.mode !== mode) {
+    const label = clearing ? "清除搜索并回到首页顶部" : "回到顶部";
+    button.dataset.mode = mode;
+    button.classList.toggle("is-clear-search", clearing);
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.innerHTML = clearing ? icons.clearSearch : icons.up;
+  }
+  button.classList.toggle("is-visible", window.scrollY > Math.max(500, window.innerHeight * 0.75));
 }
 
 function bindAlbumCards(root = document) {
@@ -1644,6 +1670,7 @@ function bindSearchControls() {
     clearTimeout(searchTimer);
     searchQuery = input.value.trim();
     searchTag = "";
+    syncBackToTop(); // 搜索/清空后同步回顶按钮的“清除搜索”语义
     const params = new URLSearchParams();
     if (searchQuery) params.set("q", searchQuery);
     history.replaceState({}, "", appUrl(`/${params.size ? `?${params}` : ""}`));
@@ -3021,6 +3048,15 @@ async function route() {
   }
   requestAnimationFrame(() => smoothScroll?.resize());
 }
+
+// 左上角品牌区点击回首页：事件委托，navigate 会按 BASE_PATH 处理子路径部署。
+app.addEventListener("click", (event) => {
+  const brand = event.target instanceof Element ? event.target.closest("[data-brand-home]") : null;
+  if (brand && app.contains(brand)) {
+    event.preventDefault();
+    navigate("/");
+  }
+});
 
 initSmoothScroll();
 window.addEventListener("popstate", () => route().catch(errorPanel));
