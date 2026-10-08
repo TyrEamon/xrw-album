@@ -47,7 +47,7 @@ data/photos/*.json      相册详情构建产物
 data/manifest.json      数据集元信息
 migrations/0001_init.sql D1 基础表结构
 migrations/0002_publishing.sql 发布状态、TG文件映射和标签表
-publisher/              Go 编写的 VPS 常驻发布端
+（上传器已拆到独立仓库 github.com/TyrEamon/xrw-album-publisher）
 scripts/build-data.js   从 linuxdo-85w.txt 构建数据
 scripts/export-d1-sql.js 导出 D1 seed SQL
 scripts/test-photos-api.js Node API 回归测试
