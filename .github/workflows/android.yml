@@ -1,0 +1,60 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "android/**"
+      - "publisher/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: publisher/go.mod
+          cache-dependency-path: publisher/go.sum
+
+      # Android forbids executing files from the data directory, so the uploader is
+      # shipped as libxrwuploader.so inside jniLibs (see android/README.md).
+      - name: Build the uploader for arm64 Android
+        working-directory: publisher
+        run: |
+          mkdir -p ../android/app/src/main/jniLibs/arm64-v8a
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" \
+            -o ../android/app/src/main/jniLibs/arm64-v8a/libxrwuploader.so ./cmd/xrw-local-uploader
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # No Gradle wrapper is committed (its jar is a binary), so fetch Gradle here.
+      - name: Set up Gradle
+        run: |
+          curl -sSL -o "$RUNNER_TEMP/gradle.zip" https://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$HOME"
+          echo "$HOME/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+
+      - name: Build the debug APK
+        working-directory: android
+        run: gradle --no-daemon --console=plain assembleDebug
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrw-uploader-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
