@@ -34,11 +34,15 @@ func ExportSnapshot(ctx context.Context, store *Store, outDir string, limit int,
 		if err != nil {
 			return "", 0, 0, fmt.Errorf("legacy snapshot album %s: %w", candidate.AlbumID, err)
 		}
-		if len(images) != album.Expected {
+		if len(images) == 0 || len(images) != album.Expected {
 			return "", 0, 0, fmt.Errorf("legacy snapshot album %s expects %d images but has %d", album.ID, album.Expected, len(images))
 		}
+		source := album.Source
+		if source == "" {
+			source = SourceLinuxDO85W
+		}
 		payload := model.PublishPayload{
-			ID: album.ID, Source: "linuxdo-85w", Title: album.Title, Count: len(images),
+			ID: album.ID, Source: source, Title: album.Title, Count: len(images),
 			Href: "/album/" + album.ID, Status: "ok", Photos: make([]model.Image, len(images)),
 		}
 		for index, image := range images {

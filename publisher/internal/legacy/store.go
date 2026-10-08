@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -27,6 +28,8 @@ CREATE TABLE IF NOT EXISTS legacy_albums (
   retry_count INTEGER NOT NULL DEFAULT 0,
   next_retry_at INTEGER NOT NULL DEFAULT 0,
   last_error TEXT NOT NULL DEFAULT '',
+  cover_url TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'linuxdo-85w',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -83,6 +86,8 @@ type Album struct {
 	Expected     int
 	TargetChatID string
 	Status       string
+	CoverURL     string
+	Source       string
 }
 
 type Image struct {
@@ -105,6 +110,7 @@ type Image struct {
 
 type Stats struct {
 	Pending, Processing, Incomplete, Ready, Invalid int
+	Parked                                          int
 	Images, Downloaded, Uploaded, Dead              int
 	SourceBytes, TelegramBytes                      int64
 }
@@ -129,14 +135,86 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate legacy database: %w", err)
 	}
+	// CREATE TABLE IF NOT EXISTS leaves pre-existing databases untouched, so
+	// columns added after the first release need an explicit backfill.
+	if err := addMissingColumns(db, "legacy_albums", map[string]string{
+		"cover_url": "TEXT NOT NULL DEFAULT ''",
+		"source":    "TEXT NOT NULL DEFAULT 'linuxdo-85w'",
+	}); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate legacy database: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+func addMissingColumns(db *sql.DB, table string, columns map[string]string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	present := make(map[string]bool)
+	for rows.Next() {
+		var (
+			index      int
+			name, kind string
+			notNull    int
+			fallback   any
+			primaryKey int
+		)
+		if err := rows.Scan(&index, &name, &kind, &notNull, &fallback, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		present[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(columns))
+	for name := range columns {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if present[name] {
+			continue
+		}
+		if _, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + name + " " + columns[name]); err != nil {
+			return fmt.Errorf("add column %s.%s: %w", table, name, err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// SyncStatusPending queues a newly discovered album for the upload runner.
+// SyncStatusParked stages it instead, so a catalogue can be discovered in full
+// while only the albums an operator selects ever reach Telegram.
+const (
+	SyncStatusPending = "pending"
+	SyncStatusParked  = "parked"
+)
+
 func (s *Store) SyncSource(ctx context.Context, path string, chats []string) (int, int, error) {
+	return s.SyncAlbums(ctx, chats, SyncStatusPending, func(visit func(SourceAlbum) error) error {
+		return ParseSource(path, visit)
+	})
+}
+
+// SyncAlbums records every album produced by walk. The status argument applies
+// only to rows inserted by this call: an album that already exists keeps the
+// state the runner advanced it to, so re-running a sync never re-queues or
+// resurrects published work.
+func (s *Store) SyncAlbums(ctx context.Context, chats []string, status string, walk func(visit func(SourceAlbum) error) error) (int, int, error) {
 	if len(chats) == 0 {
 		return 0, 0, fmt.Errorf("TG_CHAT_IDS is required")
+	}
+	if status != SyncStatusPending && status != SyncStatusParked {
+		return 0, 0, fmt.Errorf("unsupported sync status %q", status)
+	}
+	if walk == nil {
+		return 0, 0, fmt.Errorf("sync walker is required")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -145,11 +223,13 @@ func (s *Store) SyncSource(ctx context.Context, path string, chats []string) (in
 	defer tx.Rollback()
 	albumStatement, err := tx.PrepareContext(ctx, `
 INSERT INTO legacy_albums
-  (album_id, ordinal, title, expected_count, target_chat_id, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+  (album_id, ordinal, title, expected_count, target_chat_id, status, cover_url, source, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(album_id) DO UPDATE SET
   title = excluded.title,
   expected_count = excluded.expected_count,
+  cover_url = excluded.cover_url,
+  source = excluded.source,
   updated_at = excluded.updated_at`)
 	if err != nil {
 		return 0, 0, err
@@ -168,9 +248,14 @@ ON CONFLICT(album_id, sort_order) DO UPDATE SET
 
 	now := time.Now().Unix()
 	albums, images := 0, 0
-	err = ParseSource(path, func(album SourceAlbum) error {
+	err = walk(func(album SourceAlbum) error {
 		chat := chats[album.Ordinal%len(chats)]
-		if _, err := albumStatement.ExecContext(ctx, album.ID, album.Ordinal, album.Title, len(album.URLs), chat, now, now); err != nil {
+		source := album.Source
+		if source == "" {
+			source = SourceLinuxDO85W
+		}
+		if _, err := albumStatement.ExecContext(ctx, album.ID, album.Ordinal, album.Title,
+			len(album.URLs), chat, status, album.Cover, source, now, now); err != nil {
 			return err
 		}
 		for index, sourceURL := range album.URLs {
@@ -191,6 +276,148 @@ ON CONFLICT(album_id, sort_order) DO UPDATE SET
 	return albums, images, nil
 }
 
+// ActivateAlbums moves staged albums into the upload queue. Albums in any other
+// state are left alone, so a stale click cannot reset published work, and an
+// album whose image list was never filled in stays parked instead of reaching
+// the runner empty.
+func (s *Store) ActivateAlbums(ctx context.Context, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	statement, err := tx.PrepareContext(ctx, `
+UPDATE legacy_albums SET status = 'pending', next_retry_at = 0, last_error = '', updated_at = ?
+WHERE album_id = ? AND status = 'parked' AND expected_count > 0`)
+	if err != nil {
+		return 0, err
+	}
+	defer statement.Close()
+	now := time.Now().Unix()
+	activated := 0
+	for _, id := range ids {
+		result, err := statement.ExecContext(ctx, now, id)
+		if err != nil {
+			return 0, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		activated += int(affected)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return activated, nil
+}
+
+// AlbumFilter narrows ListAlbums. A zero value lists every album, oldest
+// ordinal first, which for a newest-first source puts the freshest albums at
+// the top of the picker.
+type AlbumFilter struct {
+	Status string
+	Query  string
+	Limit  int
+	Offset int
+}
+
+// ListAlbums returns one page of catalogue rows plus the total number of rows
+// matching the same filter, so a caller can page without a second round trip.
+func (s *Store) ListAlbums(ctx context.Context, filter AlbumFilter) ([]Album, int, error) {
+	where := "1 = 1"
+	var args []any
+	if filter.Status != "" {
+		where += " AND status = ?"
+		args = append(args, filter.Status)
+	}
+	if filter.Query != "" {
+		// instr() avoids LIKE wildcards, so a title containing % or _ stays a
+		// literal substring instead of silently matching everything.
+		where += " AND (instr(lower(title), lower(?)) > 0 OR instr(lower(album_id), lower(?)) > 0)"
+		args = append(args, filter.Query, filter.Query)
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM legacy_albums WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limit := filter.Limit
+	if limit < 1 {
+		limit = 60
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT album_id, ordinal, title, expected_count, target_chat_id, status, cover_url, source
+FROM legacy_albums WHERE `+where+` ORDER BY ordinal LIMIT ? OFFSET ?`, pageArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var result []Album
+	for rows.Next() {
+		var album Album
+		if err := rows.Scan(&album.ID, &album.Ordinal, &album.Title, &album.Expected,
+			&album.TargetChatID, &album.Status, &album.CoverURL, &album.Source); err != nil {
+			return nil, 0, err
+		}
+		result = append(result, album)
+	}
+	return result, total, rows.Err()
+}
+
+// SetAlbumImages replaces the image list of a staged album and fixes its
+// expected count in one transaction. It only touches albums that are still
+// parked, so a race with the runner cannot corrupt an in-flight download.
+func (s *Store) SetAlbumImages(ctx context.Context, albumID string, urls []string) error {
+	if len(urls) == 0 {
+		return fmt.Errorf("album %s has no images", albumID)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM legacy_albums WHERE album_id = ?`, albumID).Scan(&status); err != nil {
+		return err
+	}
+	if status != SyncStatusParked {
+		return fmt.Errorf("album %s is %s, not parked", albumID, status)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM legacy_images WHERE album_id = ?`, albumID); err != nil {
+		return err
+	}
+	now := time.Now().Unix()
+	statement, err := tx.PrepareContext(ctx, `
+INSERT INTO legacy_images (album_id, sort_order, source_url, status, updated_at)
+VALUES (?, ?, ?, 'pending', ?)
+ON CONFLICT(album_id, sort_order) DO UPDATE SET
+  source_url = excluded.source_url,
+  updated_at = excluded.updated_at`)
+	if err != nil {
+		return err
+	}
+	defer statement.Close()
+	for index, sourceURL := range urls {
+		if _, err := statement.ExecContext(ctx, albumID, index+1, sourceURL, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE legacy_albums SET expected_count = ?, updated_at = ? WHERE album_id = ?`,
+		len(urls), now, albumID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) RecoverProcessing(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE legacy_albums SET status = 'incomplete', next_retry_at = 0, updated_at = ?
@@ -208,9 +435,10 @@ WHERE album_id = (
   ORDER BY CASE status WHEN 'incomplete' THEN 0 ELSE 1 END, ordinal
   LIMIT 1
 )
-RETURNING album_id, ordinal, title, expected_count, target_chat_id, status`, time.Now().Unix(), time.Now().Unix())
+RETURNING album_id, ordinal, title, expected_count, target_chat_id, status, cover_url, source`, time.Now().Unix(), time.Now().Unix())
 	var album Album
-	if err := row.Scan(&album.ID, &album.Ordinal, &album.Title, &album.Expected, &album.TargetChatID, &album.Status); err != nil {
+	if err := row.Scan(&album.ID, &album.Ordinal, &album.Title, &album.Expected,
+		&album.TargetChatID, &album.Status, &album.CoverURL, &album.Source); err != nil {
 		if err == sql.ErrNoRows {
 			return Album{}, false, nil
 		}
@@ -344,9 +572,10 @@ LIMIT ?`, limit)
 func (s *Store) SnapshotAlbum(ctx context.Context, albumID string) (Album, []Image, error) {
 	var album Album
 	err := s.db.QueryRowContext(ctx, `
-SELECT album_id, ordinal, title, expected_count, target_chat_id, status
+SELECT album_id, ordinal, title, expected_count, target_chat_id, status, cover_url, source
 FROM legacy_albums WHERE album_id = ?`, albumID).Scan(
-		&album.ID, &album.Ordinal, &album.Title, &album.Expected, &album.TargetChatID, &album.Status,
+		&album.ID, &album.Ordinal, &album.Title, &album.Expected, &album.TargetChatID,
+		&album.Status, &album.CoverURL, &album.Source,
 	)
 	if err != nil {
 		return Album{}, nil, err
@@ -409,6 +638,8 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 			stats.Ready = count
 		case "invalid":
 			stats.Invalid = count
+		case SyncStatusParked:
+			stats.Parked = count
 		}
 	}
 	if err := rows.Close(); err != nil {

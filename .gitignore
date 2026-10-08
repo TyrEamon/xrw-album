@@ -22,5 +22,11 @@ publisher/local-uploader-data/
 dist-worker-dry-run/
 dist-gh-pages/
 
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/jniLibs/
+
 local-*.png
 remote-*.png

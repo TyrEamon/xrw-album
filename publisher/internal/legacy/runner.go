@@ -314,9 +314,17 @@ func (r *Runner) writeOutbox(album Album, items []Image) error {
 			FileUnique: item.TGFileUnique, MessageID: item.TGMessageID, ChannelID: album.TargetChatID,
 			ContentType: item.ContentType}
 	}
+	cover := ""
+	if len(photos) > 0 {
+		cover = photos[0].URL
+	}
+	source := album.Source
+	if source == "" {
+		source = SourceLinuxDO85W
+	}
 	payload := map[string]any{
-		"id": album.ID, "source": "linuxdo-85w", "title": album.Title,
-		"count": len(items), "cover": photos[0].URL, "href": "/album/" + album.ID,
+		"id": album.ID, "source": source, "title": album.Title,
+		"count": len(items), "cover": cover, "href": "/album/" + album.ID,
 		"status": "ok", "photos": photos, "tg_files": files,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")

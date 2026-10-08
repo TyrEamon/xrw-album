@@ -9,10 +9,16 @@ import (
 	"strings"
 )
 
+// SourceLinuxDO85W labels albums parsed from the original Telegraph archive so
+// the published payload keeps identifying which source an album came from.
+const SourceLinuxDO85W = "linuxdo-85w"
+
 type SourceAlbum struct {
 	ID      string
 	Ordinal int
 	Title   string
+	Cover   string
+	Source  string
 	URLs    []string
 }
 
@@ -38,6 +44,8 @@ func ParseSource(path string, visit func(SourceAlbum) error) error {
 			ID:      sourceAlbumID(ordinal, title, coverForID),
 			Ordinal: ordinal,
 			Title:   title,
+			Cover:   coverForID,
+			Source:  SourceLinuxDO85W,
 			URLs:    append([]string(nil), urls...),
 		}
 		if err := visit(album); err != nil {
