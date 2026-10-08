@@ -51,6 +51,18 @@ type botEnvelope struct {
 	OK          bool            `json:"ok"`
 	Description string          `json:"description"`
 	Result      json.RawMessage `json:"result"`
+	Parameters  struct {
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters"`
+}
+
+type RetryAfterError struct {
+	Duration    time.Duration
+	Description string
+}
+
+func (e *RetryAfterError) Error() string {
+	return fmt.Sprintf("Telegram rate limited the request for %s: %s", e.Duration, e.Description)
 }
 
 type botMessage struct {
@@ -60,6 +72,9 @@ type botMessage struct {
 		FileUniqueID string `json:"file_unique_id"`
 		MimeType     string `json:"mime_type"`
 	} `json:"document"`
+	Sticker *struct {
+		FileID string `json:"file_id"`
+	} `json:"sticker"`
 }
 
 type inputMedia struct {
@@ -84,7 +99,18 @@ func (c *Client) Enabled() bool {
 
 // UploadGroup publishes one document or a Telegram media group of 2-10 documents.
 // Caption is attached only to the first document in the request.
-func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadItem, caption string) ([]Result, error) {
+//
+// Telegram classifies an upload as a sticker whenever the multipart part is named
+// *.webp or declared as image/webp, and a media group cannot reference a sticker,
+// so such batches are published one document per request with content type
+// detection disabled. The original WebP bytes, file name and image/webp mime type
+// all survive; only the media group layout is lost.
+func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadItem, caption string) (results []Result, err error) {
+	defer func() {
+		if c != nil {
+			err = redactError(err, c.botToken)
+		}
+	}()
 	if !c.Enabled() {
 		return nil, fmt.Errorf("TG_BOT_TOKEN and IMAGE_PUBLIC_BASE are required")
 	}
@@ -94,6 +120,25 @@ func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadI
 	if len(items) == 0 || len(items) > maxMediaGroupSize {
 		return nil, fmt.Errorf("Telegram document upload must contain 1-%d items", maxMediaGroupSize)
 	}
+	if !containsWebP(items) {
+		return c.uploadOnce(ctx, chatID, items, caption)
+	}
+	results = make([]Result, 0, len(items))
+	for index, item := range items {
+		groupCaption := ""
+		if index == 0 {
+			groupCaption = caption
+		}
+		single, err := c.uploadOnce(ctx, chatID, []UploadItem{item}, groupCaption)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, single...)
+	}
+	return results, nil
+}
+
+func (c *Client) uploadOnce(ctx context.Context, chatID string, items []UploadItem, caption string) ([]Result, error) {
 	if err := c.wait(ctx, chatID); err != nil {
 		return nil, err
 	}
@@ -105,6 +150,7 @@ func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadI
 	}
 
 	pipeReader, pipeWriter := io.Pipe()
+	defer pipeReader.Close()
 	writer := multipart.NewWriter(pipeWriter)
 	endpointMethod := "sendMediaGroup"
 	if len(items) == 1 {
@@ -130,7 +176,7 @@ func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadI
 
 	response, err := c.client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Telegram 连接失败，请检查 HTTPS_PROXY 和本机代理是否运行: %w", err)
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -142,6 +188,12 @@ func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadI
 		return nil, fmt.Errorf("decode Telegram response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || !envelope.OK {
+		if envelope.Parameters.RetryAfter > 0 {
+			return nil, &RetryAfterError{
+				Duration:    time.Duration(envelope.Parameters.RetryAfter) * time.Second,
+				Description: envelope.Description,
+			}
+		}
 		return nil, fmt.Errorf("Telegram Bot API HTTP %d: %s", response.StatusCode, envelope.Description)
 	}
 
@@ -163,6 +215,9 @@ func (c *Client) UploadGroup(ctx context.Context, chatID string, items []UploadI
 	for index, message := range messages {
 		fileID, uniqueID, contentType := documentMedia(message, items[index].ContentType)
 		if fileID == "" {
+			if message.Sticker != nil {
+				return nil, fmt.Errorf("Telegram 把第 %d 个文件当成贴纸（.webp），没有返回 document；该文件未上传成功", index+1)
+			}
 			return nil, fmt.Errorf("Telegram response item %d has no document file_id", index+1)
 		}
 		results[index] = Result{
@@ -190,7 +245,13 @@ func writeUploadForm(writer *multipart.Writer, chatID string, items []UploadItem
 				return err
 			}
 		}
-		if err := writer.WriteField("disable_content_type_detection", "false"); err != nil {
+		// Telegram stores a *.webp upload as a sticker unless detection is turned
+		// off, and a sticker reply carries no document entry.
+		detection := "false"
+		if isWebP(items[0]) {
+			detection = "true"
+		}
+		if err := writer.WriteField("disable_content_type_detection", detection); err != nil {
 			return err
 		}
 		return writeFilePart(writer, "document", items[0])
@@ -244,6 +305,23 @@ func documentMedia(message botMessage, fallbackContentType string) (string, stri
 		contentType = fallbackContentType
 	}
 	return message.Document.FileID, message.Document.FileUniqueID, contentType
+}
+
+func containsWebP(items []UploadItem) bool {
+	for _, item := range items {
+		if isWebP(item) {
+			return true
+		}
+	}
+	return false
+}
+
+// isWebP reports whether Telegram would file this upload under stickers rather
+// than documents. The bot API decides that from the part name and the declared
+// type alone, so both have to be checked.
+func isWebP(item UploadItem) bool {
+	return strings.EqualFold(filepath.Ext(item.Path), ".webp") ||
+		strings.EqualFold(strings.TrimSpace(item.ContentType), "image/webp")
 }
 
 func (c *Client) wait(ctx context.Context, chatID string) error {
