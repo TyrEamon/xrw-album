@@ -178,6 +178,7 @@ export function createTurnstilePanel({ document, window, onRetry }) {
     }
     if (panel.hidden) previousFocus = document.activeElement;
     panel.hidden = false;
+    panel.style.display = "flex";
     status.textContent = text.pending;
     retry.hidden = true;
   }
@@ -237,7 +238,10 @@ export function createTurnstilePanel({ document, window, onRetry }) {
       retry.disabled = false;
     },
     hide() {
-      if (panel) panel.hidden = true;
+      if (panel) {
+        panel.hidden = true;
+        panel.style.display = "none";
+      }
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     }
   };

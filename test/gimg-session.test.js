@@ -160,6 +160,12 @@ test("app keeps public JSON fallback credential-free and explicit observe retrie
   assert.match(source, /if \(!gimgSession\.ready\(\)\) return;/);
 });
 
+test("challenge panel inline display is reset when hidden and restored when shown", async () => {
+  const source = await readFile(new URL("../public/gimg-session.js", import.meta.url), "utf8");
+  assert.match(source, /panel\.hidden = false;\s*panel\.style\.display = "flex";/);
+  assert.match(source, /panel\.hidden = true;\s*panel\.style\.display = "none";/);
+});
+
 test("session fetch abort timeout is bounded", async () => {
   const f = fixture([(init) => new Promise((resolve, reject) => {
     init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });

@@ -11,7 +11,11 @@
 
 ## 结论
 
-Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开 JSON 独立配额已部署到 Worker，当前 `observe` 模式只记录决策、不强制图片会话。线上 `/session` GET 返回 `authenticated:false, mode:observe`，HTTP 200。xrm 前端改动已推送 GitHub `main`（commit `ea5e29acdee977be34b14846342840adbd80ec7d`）；Pages workflow run 281 已成功；线上新 HTML已更新至 `app.js?v=20261010-session-2` 与 `styles.css?v=20261010-session-2`。初次浏览器访问读到旧缓存，追加版本查询后新版模块通过真实浏览器验证：Turnstile通过、POST后GET确认会话，原生图片请求携带会话Cookie并返回200 image/jpeg（private,no-store）。
+Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开 JSON 独立配额已部署到 Worker。最初以 `observe` 发布，后在本次排障前已切换至 `enforce`；用户首次验证后遮罩未收起，但已成功取得会话。根因是挑战面板通过 `panel.hidden` 隐藏的同时保留了内联 `display:flex`，CSS `[hidden]` 默认规则被内联显示覆盖，因此只隐藏失败提示文本，整屏遮罩仍可见。已修复 show/hide 时同步设置 `display:flex/none`，并递增模块缓存版本；修复待发布与线上复测。xrm 前端改动已推送 GitHub `main`（commit `ea5e29acdee977be34b14846342840adbd80ec7d`）；Pages workflow run 281 已成功；线上新 HTML已更新至 `app.js?v=20261010-session-2` 与 `styles.css?v=20261010-session-2`。初次浏览器访问读到旧缓存，追加版本查询后新版模块通过真实浏览器验证：Turnstile通过、POST后GET确认会话，原生图片请求携带会话Cookie并返回200 image/jpeg（private,no-store）。
+
+## 遮罩不收起故障修复（待线上验证）
+
+用户首次验证后看到背景页面仍被遮罩覆盖。提供的 Network 记录显示 `/session` GET 200 → OPTIONS 204 → POST 200（Set-Cookie）→ GET 200；最后响应会话已建立。代码根因确认：面板初次创建时内联 `display:flex`，hide 只写 `hidden=true`，但浏览器内联 display 优先于 `[hidden]{display:none}`，面板持续覆盖页面。修复为 hide 同时设 `display:none`、show 显式恢复 `display:flex`，测试增加显隐回归断言。发布版本更新后需做无痕首次访问验收，确保成功回调后遮罩消失。
 
 ## 已运行验证（A 级）
 
@@ -20,7 +24,7 @@ Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开
 - Worker：`npm run check` 通过；`npm test` 通过，42 tests / 42 pass / 0 fail。测试显式限定 `test/worker.test.js test/session.test.js`，不遍历无关 `GPT&Grok` 子树。
 - 新增回归覆盖会话轮换共享IP配额：同一IP不同sid使用不同sid键、同IP键一致；任一IP桶拒绝时整体429。GET `/session` 使用独立状态桶；observe拒绝只记事件并仍返回状态，enforce 返回429。
 - Worker打包及发布：Wrangler 4.125.0 dry-run成功；部署时首次因本地配置将远程路由误声明为custom domain且DNS由外部管理而失败，随后恢复为远程既有路由 `gimg.mtcacg.top/*`（zone `mtcacg.top`）再部署成功。当前版本 `a854cb77-cb47-4593-8e6f-dba4a0f04a5f`，绑定session10/min、status120/min、image600/min、JSON120/min、upstream180/min，`SESSION_MODE=observe`。`/session` 实际GET返回200与authenticated=false。
-- 前端：`node --test test/gimg-session.test.js` 通过，14/14；`node scripts/test-pages-search.js` 通过，涵盖根路径和 `/xrw-album/` 路径的会话资源复制与版本化；`node --check public/app.js`、`node --check public/gimg-session.js`、`git diff --check` 通过。
+- 前端修复：`node --test test/gimg-session.test.js` 通过，15/15（含遮罩显隐修复断言）；`node scripts/test-pages-search.js` 通过，涵盖根路径和 `/xrw-album/` 路径的会话资源复制与版本化；`node --check public/app.js`、`node --check public/gimg-session.js`、`git diff --check` 通过。
 - Pages静态构建：在相册仓库执行 `node scripts/build-gh-pages.js`，设置 `GITHUB_PAGES_BASE=/`、`GIMG_PUBLIC_BASE=https://gimg.mtcacg.top`、JSON回退地址及 1/2/3 数据源；生成 14973 个本地详情、416 个 shard，构建成功。缺少 `snapshot-data/batches`，因此该次构建的 Snapshot albums 为 0；不得用该本地产物发布替换线上数据。构建输出 `dist-gh-pages` 已被脚本覆写为本次本地验证产物。
 - Pages：commit `ea5e29acdee977be34b14846342840adbd80ec7d` 已推送到 `main`，workflow run 281 成功。真实浏览器使用 `?gimg-verify=1&v=20261010-session-1` 打开新版本并完成验证。
 
