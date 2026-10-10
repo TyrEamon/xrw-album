@@ -139,8 +139,9 @@ export function createTurnstilePanel({ document, window, onRetry }) {
   let retry;
   let previousFocus;
   const text = {
-    title: "\u7ee7\u7eed\u6d4f\u89c8\u5149\u5f71\u6863\u6848",
-    pending: "\u8bf7\u5b8c\u6210\u4e00\u6b21\u9a8c\u8bc1\uff0c\u5373\u53ef\u7ee7\u7eed\u6d4f\u89c8\u56fe\u7247\u3002",
+    brand: "album.mtcacg.top",
+    title: "\u6b63\u5728\u8fdb\u884c\u8bbf\u95ee\u9a8c\u8bc1",
+    pending: "\u672c\u7ad9\u542f\u7528\u8bbf\u95ee\u4fdd\u62a4\u4ee5\u9632\u6b62\u81ea\u52a8\u5316\u8bbf\u95ee\u3002\u8bf7\u5b8c\u6210\u4e0b\u65b9\u9a8c\u8bc1\uff0c\u901a\u8fc7\u540e\u5c06\u81ea\u52a8\u7ee7\u7eed\u6d4f\u89c8\u3002",
     failed: "\u9a8c\u8bc1\u6682\u672a\u5b8c\u6210\u3002\u8bf7\u68c0\u67e5\u7f51\u7edc\u6216\u6d4f\u89c8\u5668 Cookie \u8bbe\u7f6e\uff0c\u7136\u540e\u91cd\u8bd5\u3002",
     retry: "\u91cd\u65b0\u9a8c\u8bc1"
   };
@@ -150,21 +151,29 @@ export function createTurnstilePanel({ document, window, onRetry }) {
       panel.setAttribute("role", "region");
       panel.setAttribute("aria-labelledby", "gimg-session-title");
       panel.setAttribute("data-lenis-prevent", "");
-      panel.style.cssText = "position:fixed;z-index:100000;inset:auto 16px 24px;margin:auto;max-width:420px;max-height:85vh;overflow:auto;box-sizing:border-box;padding:24px;border:1px solid #b49770;border-radius:16px;background:#201c1b;color:#f2e8da;box-shadow:0 12px 48px #0008;font:15px/1.7 system-ui,sans-serif";
+      panel.style.cssText = "position:fixed;z-index:100000;inset:0;display:flex;align-items:flex-start;justify-content:center;overflow:auto;box-sizing:border-box;padding:clamp(48px,12vh,120px) 20px 32px;background:rgba(0,0,0,.96);color:#f2eee6;font:15px/1.65 var(--font-body,Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif)";
+      const content = document.createElement("div");
+      content.style.cssText = "width:min(100%,720px);margin:0 auto";
+      const brand = document.createElement("div");
+      brand.textContent = text.brand;
+      brand.style.cssText = "margin-bottom:10px;color:#f2eee6;font:600 clamp(28px,5vw,44px)/1.15 var(--font-display,Fraunces,Georgia,serif);letter-spacing:-.035em";
       const title = document.createElement("h2");
       title.id = "gimg-session-title";
       title.textContent = text.title;
-      title.style.cssText = "font-size:20px;margin:0 0 8px";
+      title.style.cssText = "font-size:24px;line-height:1.3;margin:0 0 8px;color:#f2eee6";
       status = document.createElement("p");
       status.setAttribute("role", "status");
       status.setAttribute("aria-live", "polite");
+      status.style.cssText = "max-width:680px;margin:0 0 24px;color:#b8b2a8;line-height:1.8";
       slot = document.createElement("div");
+      slot.style.cssText = "width:min(100%,338px);min-height:65px";
       retry = document.createElement("button");
       retry.type = "button";
       retry.textContent = text.retry;
-      retry.style.cssText = "padding:10px 18px;border:1px solid #d9bf99;border-radius:8px;background:#ead6b8;color:#201c1b;cursor:pointer;font:inherit";
+      retry.style.cssText = "margin-top:16px;padding:10px 18px;border:1px solid #d4a574;border-radius:3px;background:transparent;color:#f2eee6;cursor:pointer;font:inherit";
       retry.addEventListener("click", () => { retry.disabled = true; onRetry(); });
-      panel.append(title, status, slot, retry);
+      content.append(brand, title, status, slot, retry);
+      panel.append(content);
       document.body.append(panel);
     }
     if (panel.hidden) previousFocus = document.activeElement;
