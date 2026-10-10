@@ -37,6 +37,12 @@ jobs:
         with:
           node-version: 22
 
+      - name: Verify session client and Pages assets
+        working-directory: site
+        run: |
+          node --test test/gimg-session.test.js
+          node scripts/test-pages-search.js
+
       - name: Build static gallery
         working-directory: site
         run: npm run build:gh-pages

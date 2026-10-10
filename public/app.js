@@ -1,6 +1,41 @@
 import { parseSearch, matchesSearch, quoteSearchValue, searchToFields, buildSearchQuery } from "./search.js?v=20260918-2";
 
+import { createGimgSession, createTurnstilePanel, isGimgUrl } from "./gimg-session.js?v=20261010-1";
+
 const app = document.querySelector("#app");
+const verifyGimgSession = new URLSearchParams(location.search).get("gimg-verify") === "1";
+let initialSessionCheck = true;
+const sessionPanel = createTurnstilePanel({ document, window, onRetry: () => {
+  gimgSession.retry({ verify: verifyGimgSession }).then(() => route()).catch(() => {});
+} });
+const gimgSession = createGimgSession({
+  challenge: () => sessionPanel.challenge(),
+  onFailure: () => sessionPanel.failure(),
+  onReady: () => sessionPanel.hide()
+});
+const retriedGimgImages = new WeakSet();
+const recoveredGimgViewers = new WeakSet();
+// Capture also covers Fancybox-created images; only failed, connected gimg images retry.
+document.addEventListener("error", async (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || retriedGimgImages.has(image)) return;
+  const src = image.currentSrc || image.src;
+  if (!isGimgUrl(src)) return;
+  retriedGimgImages.add(image);
+  const viewer = image.closest(".fancybox__container") ? window.Fancybox?.getInstance?.() : null;
+  if (await gimgSession.recoverImage()) {
+    // Fancybox replaces failed Panzoom content; recreate only the still-active viewer.
+    if (viewer && viewer === window.Fancybox?.getInstance?.() && lightboxIndex !== null) {
+      if (recoveredGimgViewers.has(viewer)) return;
+      recoveredGimgViewers.add(viewer);
+      openLightbox(lightboxIndex);
+      return;
+    }
+    if (!image.isConnected || (image.currentSrc || image.src) !== src) return;
+    image.classList.remove("broken");
+    image.src = src;
+  }
+}, true);
 const pendingLikes = new Map();
 
 const PAGE_SIZE = 32;
@@ -317,13 +352,14 @@ async function staticGetJson(url, options = {}) {
   throw new Error(`Static route not found: ${path}`);
 }
 
-async function fetchJsonWithTimeout(url, timeout) {
+async function fetchJsonWithTimeout(url, timeout, credentials = "same-origin") {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
-      signal: controller.signal
+      signal: controller.signal,
+      credentials
     });
     if (!response.ok) throw new Error(`Static data failed: ${response.status}`);
     return await response.json();
@@ -340,6 +376,7 @@ async function fetchStaticJson(path, sourceBase = "", sourceId = "main") {
     if (!JSON_FALLBACK_BASE) throw directError;
     const fallbackUrl = `${JSON_FALLBACK_BASE}/${encodeURIComponent(sourceId)}/${path.replace(/^\/+/, "")}`;
     console.warn(`Direct static data unavailable; using gimg fallback: ${sourceId}/${path}`, directError);
+    // The public JSON mirror uses wildcard CORS, so keep it credential-free.
     return fetchJsonWithTimeout(fallbackUrl, FALLBACK_JSON_TIMEOUT);
   }
 }
@@ -835,11 +872,19 @@ function lazyImage(src, alt, eager = false, size = null) {
   const dimensions = width > 0 && height > 0
     ? ` width="${Math.round(width)}" height="${Math.round(height)}"`
     : "";
-  return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${dimensions} referrerpolicy="no-referrer" decoding="async" fetchpriority="${priority}" ${eager ? 'loading="eager"' : 'loading="lazy"'}>`;
+  const sourceAttribute = isGimgUrl(src) && !gimgSession.ready() ? "data-gimg-src" : "src";
+  return `<img ${sourceAttribute}="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${dimensions} referrerpolicy="no-referrer" decoding="async" fetchpriority="${priority}" ${eager ? 'loading="eager"' : 'loading="lazy"'}>`;
 }
 
 function markLoadedImages(root = document) {
   root.querySelectorAll("img").forEach((image) => {
+    if (image.dataset.gimgSrc) {
+      gimgSession.ensure().then(() => {
+        if (!image.isConnected || !gimgSession.ready()) return;
+        image.src = image.dataset.gimgSrc;
+        delete image.dataset.gimgSrc;
+      }).catch(() => {});
+    }
     const done = () => {
       image.classList.add("loaded");
     };
@@ -2401,6 +2446,8 @@ function prefetchNextTabPage(tab) {
 }
 
 function warmPrefetchedMedia(tab, data) {
+  // Prefetch is optional: never launch a challenge or bypass a pending renewal here.
+  if (!gimgSession.ready()) return;
   if (tab === "photos" && Array.isArray(data.photos)) {
     return;
   }
@@ -2611,6 +2658,7 @@ function detailTemplate(data) {
 async function renderAlbum(id) {
   loading();
   const data = await getJson(`/api/album/${encodeURIComponent(id)}`);
+  await gimgSession.ensure();
   currentAlbum = {
     ...data,
     detailPages: [],
@@ -2941,8 +2989,11 @@ async function flushLikes(id) {
   }
 }
 
-function openLightbox(index) {
+async function openLightbox(index) {
   if (!currentAlbum?.photos?.length) return;
+  const album = currentAlbum;
+  try { await gimgSession.ensure(); } catch { return; }
+  if (currentAlbum !== album || !appPathname().startsWith("/album/")) return;
   lightboxIndex = index;
 
   if (!window.Fancybox?.show) {
@@ -3036,6 +3087,9 @@ async function route() {
   closeLightbox();
   const match = appPathname().match(/^\/album\/([^/]+)$/);
   try {
+    const verify = initialSessionCheck && verifyGimgSession;
+    initialSessionCheck = false;
+    await gimgSession.ensure({ verify });
     if (match) {
       await renderAlbum(decodeURIComponent(match[1]));
     } else if (appPathname() === "/tags") {
