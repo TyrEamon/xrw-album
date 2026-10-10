@@ -156,7 +156,7 @@ export function createTurnstilePanel({ document, window, onRetry }) {
       content.style.cssText = "width:min(100%,720px);margin:0 auto";
       const brand = document.createElement("div");
       brand.textContent = text.brand;
-      brand.style.cssText = "margin-bottom:10px;color:#f2eee6;font:600 clamp(28px,5vw,44px)/1.15 var(--font-display,Fraunces,Georgia,serif);letter-spacing:-.035em";
+      brand.style.cssText = "margin-bottom:10px;color:#f2eee6;font:400 clamp(52px,8vw,82px)/1.05 var(--font-velvet,'Great Vibes','Cormorant Garamond',cursive);letter-spacing:0";
       const title = document.createElement("h2");
       title.id = "gimg-session-title";
       title.textContent = text.title;

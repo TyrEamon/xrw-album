@@ -1,6 +1,6 @@
 import { parseSearch, matchesSearch, quoteSearchValue, searchToFields, buildSearchQuery } from "./search.js?v=20260918-2";
 
-import { createGimgSession, createTurnstilePanel, isGimgUrl } from "./gimg-session.js?v=20261010-2";
+import { createGimgSession, createTurnstilePanel, isGimgUrl } from "./gimg-session.js?v=20261010-3";
 
 const app = document.querySelector("#app");
 const verifyGimgSession = new URLSearchParams(location.search).get("gimg-verify") === "1";
