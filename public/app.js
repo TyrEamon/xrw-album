@@ -2712,19 +2712,21 @@ function syncDetailViewControls() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
-  app.querySelector("[data-size-control]")?.classList.toggle("is-hidden", detailViewMode === "single");
+  const mobileGallery = window.matchMedia?.("(max-width: 760px)").matches && detailViewMode === "gallery";
+  app.querySelector("[data-size-control]")?.classList.toggle("is-hidden", detailViewMode === "single" || mobileGallery);
 }
 
 function detailLayoutConfig(container) {
   const width = container?.clientWidth || Math.max(320, window.innerWidth - 32);
   const baseHeight = width < 600 ? 160 : width < 1000 ? 220 : 280;
-  const targetHeight = Math.round(baseHeight * detailImageScale / 100);
+  const imageScale = width <= 760 ? 100 : detailImageScale;
+  const targetHeight = Math.round(baseHeight * imageScale / 100);
   const gap = detailViewMode === "single" ? (width < 600 ? 12 : 20) : (width < 600 ? 5 : 8);
   return {
     width,
     targetHeight,
     gap,
-    key: `${detailViewMode}:${Math.round(width)}:${targetHeight}:${gap}`
+    key: `${detailViewMode}:${Math.round(width)}:${targetHeight}:${gap}:${width <= 760 ? 100 : detailImageScale}`
   };
 }
 
@@ -2876,7 +2878,10 @@ function renderDetailRows(options = {}) {
 function renderDetailRowsOnResize() {
   if (!currentAlbum || !appPathname().startsWith("/album/")) return;
   clearTimeout(detailResizeTimer);
-  detailResizeTimer = setTimeout(() => renderDetailRows({ force: true }), 120);
+  detailResizeTimer = setTimeout(() => {
+    syncDetailViewControls();
+    renderDetailRows({ force: true });
+  }, 120);
 }
 
 function singlePhotoRows(photos, containerWidth) {

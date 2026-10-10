@@ -166,6 +166,13 @@ test("challenge panel inline display is reset when hidden and restored when show
   assert.match(source, /panel\.hidden = true;\s*panel\.style\.display = "none";/);
 });
 
+test("album detail gallery hides the size control on mobile and fixes layout scale at 100%", async () => {
+  const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(source, /const mobileGallery = window\.matchMedia\?\.\("\(max-width: 760px\)"\)\.matches && detailViewMode === "gallery";/);
+  assert.match(source, /classList\.toggle\("is-hidden", detailViewMode === "single" \|\| mobileGallery\)/);
+  assert.match(source, /const imageScale = width <= 760 \? 100 : detailImageScale;/);
+});
+
 test("session fetch abort timeout is bounded", async () => {
   const f = fixture([(init) => new Promise((resolve, reject) => {
     init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });

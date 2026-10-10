@@ -2185,6 +2185,10 @@ img {
     border-radius: 4px;
   }
 
+  .detail-view-controls:has([data-view-mode="gallery"].active) [data-size-control] {
+    display: none;
+  }
+
   .detail-size-value {
     text-align: left;
   }

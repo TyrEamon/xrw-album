@@ -11,6 +11,8 @@
 
 ## 结论
 
+本报告按时间顺序记录此前会话发布、挑战遮罩故障修复与当前手机端样式变更；旧版本号与当时部署模式属于历史记录。当前最新提交的前端发布状态请以本报告末尾“手机端图册布局修订”段和 GitHub Pages workflow 为准。
+
 Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开 JSON 独立配额已部署到 Worker。最初以 `observe` 发布，后在本次排障前已切换至 `enforce`；用户首次验证后遮罩未收起，但已成功取得会话。根因是挑战面板通过 `panel.hidden` 隐藏的同时保留了内联 `display:flex`，CSS `[hidden]` 默认规则被内联显示覆盖，因此只隐藏失败提示文本，整屏遮罩仍可见。已修复 show/hide 时同步设置 `display:flex/none`，并递增模块缓存版本；修复已发布并完成线上资源与显隐复测。xrm 前端改动已推送 GitHub `main`（commit `ea5e29acdee977be34b14846342840adbd80ec7d`）；Pages workflow run 281 已成功；线上新 HTML已更新至 `app.js?v=20261010-session-2` 与 `styles.css?v=20261010-session-2`。初次浏览器访问读到旧缓存，追加版本查询后新版模块通过真实浏览器验证：Turnstile通过、POST后GET确认会话，原生图片请求携带会话Cookie并返回200 image/jpeg（private,no-store）。
 
 ## 遮罩不收起故障修复（A 级）
@@ -35,6 +37,12 @@ Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开
 用户反馈初版右下角卡片式面板与参考图2不符。初版日期版本的 app 模块仍被缓存命中，已将 app 和 session 模块版本号同时递增，线上新入口确认加载 `app.js?v=20261010-session-2` 与 `gimg-session.js?v=20261010-2`。已改为全屏黑底遮罩、左对齐站点域名标题/访问验证标题/说明文字，Turnstile置于其下方；使用站点暖白字体和铜色点缀。为规避浏览器及边缘缓存旧 JS，静态版本更新至 `app.js?v=20261010-session-2`、`gimg-session.js?v=20261010-2`、`styles.css?v=20261010-session-2`。Pages workflow run 38066102665（commit `15862de6b5b557272185d68559059bdcfa45e7eb`）成功；线上真实浏览器检查确认加载新版本，截图布局符合参考图2。通过命令 `node scripts/test-pages-search.js` 与 `node --test test/gimg-session.test.js`，分别验证静态资源版本与14项会话客户端测试。
 
 近期截图提出品牌标题的英文字体需采用站点 Velvet 手写字形。已将品牌标题字体改为 `var(--font-velvet, 'Great Vibes', 'Cormorant Garamond', cursive)` 并递增 app/session 模块版本至 `20261010-session-3` / `20261010-3`；本地资源复制测试与14项客户端测试通过。提交 `49d568ac` 已推送，Pages workflow run `38067094977` 成功；线上真实浏览器确认标题已切换为站点 Velvet 手写体，页面正常展示。
+
+## 手机端图册布局修订（A 级）
+
+用户要求手机端图集详情的“图册”模式取消显示大小滑条，保持100%。在 `max-width:760px` 的图册详情中隐藏该控件，并让布局计算固定采用100%缩放；桌面仍保留原滑条，单图模式不受影响。窗口尺寸变化时同步显隐，避免横竖屏切换后控件状态滞留。CSS 文件版本更新为 `styles.css?v=20261010-mobile-gallery-1`，app版本更新为 `app.js?v=20261010-session-5`。
+
+本地验证：`node --check public/app.js`、`node --test test/gimg-session.test.js`（16/16）、`node scripts/test-pages-search.js`、`git diff --check` 通过。Pages fixture 检查根路径与 `/xrw-album/` 版本链接。此次尚未部署，线上移动端效果待 Pages workflow 发布后核验。
 
 ## 代码与接口要点（B 级）
 
