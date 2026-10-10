@@ -28,7 +28,7 @@ Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开
 
 用户反馈初版右下角卡片式面板与参考图2不符。初版日期版本的 app 模块仍被缓存命中，已将 app 和 session 模块版本号同时递增，线上新入口确认加载 `app.js?v=20261010-session-2` 与 `gimg-session.js?v=20261010-2`。已改为全屏黑底遮罩、左对齐站点域名标题/访问验证标题/说明文字，Turnstile置于其下方；使用站点暖白字体和铜色点缀。为规避浏览器及边缘缓存旧 JS，静态版本更新至 `app.js?v=20261010-session-2`、`gimg-session.js?v=20261010-2`、`styles.css?v=20261010-session-2`。Pages workflow run 38066102665（commit `15862de6b5b557272185d68559059bdcfa45e7eb`）成功；线上真实浏览器检查确认加载新版本，截图布局符合参考图2。通过命令 `node scripts/test-pages-search.js` 与 `node --test test/gimg-session.test.js`，分别验证静态资源版本与14项会话客户端测试。
 
-近期截图提出品牌标题的英文字体需采用站点 Velvet 手写字形。已将品牌标题字体改为 `var(--font-velvet, 'Great Vibes', 'Cormorant Garamond', cursive)` 并递增 app/session 模块版本至 `20261010-session-3` / `20261010-3`；本地资源复制测试与14项客户端测试通过。提交 `49d568ac` 已推送，Pages workflow run `38067014796` 当时仍在构建；待工作流成功后做线上截图确认。
+近期截图提出品牌标题的英文字体需采用站点 Velvet 手写字形。已将品牌标题字体改为 `var(--font-velvet, 'Great Vibes', 'Cormorant Garamond', cursive)` 并递增 app/session 模块版本至 `20261010-session-3` / `20261010-3`；本地资源复制测试与14项客户端测试通过。提交 `49d568ac` 已推送，Pages workflow run `38067094977` 成功；线上真实浏览器确认标题已切换为站点 Velvet 手写体，页面正常展示。
 
 ## 代码与接口要点（B 级）
 
