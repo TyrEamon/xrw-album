@@ -1,9 +1,9 @@
 > **ID**: VERIFY-002
 > **性质**: 参考记录
-> **状态**: Worker 观察模式及浏览器端会话流程已验证；强制拦截未启用，验证页参考图样式已发布
+> **状态**: Worker enforce 已运行；图片限流更新为400/min并完成线上核验，验证页与移动端样式已发布
 > **更新**: 2026-10-10
 > **适用范围**: 本地 xrm-album 前端与 xrw-album-gimg-worker
-> **前提**: 本地修改、仿真测试、观察模式部署及一次真实浏览器端到端验证；未读取或复述 Cloudflare Secrets
+> **前提**: 本地修改、仿真测试、Worker enforce 部署及真实浏览器端到端验证；未读取或复述 Cloudflare Secrets
 > **依据**: [会话实施计划](20261010-PLAN-gimg-session.md)
 > **关联**: [索引](00-索引.md)、[旧令牌审计](<20261010-VERIFY-token-and-ant scraping.md>)
 
@@ -14,6 +14,12 @@
 本报告按时间顺序记录此前会话发布、挑战遮罩故障修复与当前手机端样式变更；旧版本号与当时部署模式属于历史记录。当前最新提交的前端发布状态请以本报告末尾“手机端图册布局修订”段和 GitHub Pages workflow 为准。
 
 Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开 JSON 独立配额已部署到 Worker。最初以 `observe` 发布，后在本次排障前已切换至 `enforce`；用户首次验证后遮罩未收起，但已成功取得会话。根因是挑战面板通过 `panel.hidden` 隐藏的同时保留了内联 `display:flex`，CSS `[hidden]` 默认规则被内联显示覆盖，因此只隐藏失败提示文本，整屏遮罩仍可见。已修复 show/hide 时同步设置 `display:flex/none`，并递增模块缓存版本；修复已发布并完成线上资源与显隐复测。xrm 前端改动已推送 GitHub `main`（commit `ea5e29acdee977be34b14846342840adbd80ec7d`）；Pages workflow run 281 已成功；线上新 HTML已更新至 `app.js?v=20261010-session-2` 与 `styles.css?v=20261010-session-2`。初次浏览器访问读到旧缓存，追加版本查询后新版模块通过真实浏览器验证：Turnstile通过、POST后GET确认会话，原生图片请求携带会话Cookie并返回200 image/jpeg（private,no-store）。
+
+## 当前 Worker 配额部署（A 级）
+
+2026-10-11 将图片限流从600/min调至400/min，保持会话SID桶与边缘IP桶各自400/min；每张图片同时占用两桶各1次，任一桶超限返回429。没有新增绑定或额外限流调用，因此不增加逐请求的限流检查次数。签名图片缓存命中仍计入图片桶；冷回源仍受180/min upstream桶约束。JSON120/min、session issuance10/min、session status120/min不变。Cloudflare binding 为colo级近似限额，不是跨地区统一硬上限。
+
+Worker部署版本 `179fd811-de6c-44f1-8154-c4d1d680c57c`，部署完成状态100%。`npx wrangler deploy --dry-run` 显示 IMAGE_RATE_LIMITER 400/60s、SESSION_MODE enforce；部署后线上 `GET https://gimg.mtcacg.top/session` 返回200且 `mode=enforce`。未通过线上高并发压测触发真实429，以免影响访客；此次核验确认绑定配置与运行模式，不代表计数精度测试。
 
 ## 遮罩不收起故障修复（A 级）
 
@@ -27,7 +33,7 @@ Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开
 
 - Worker：`npm run check` 通过；`npm test` 通过，42 tests / 42 pass / 0 fail。测试显式限定 `test/worker.test.js test/session.test.js`，不遍历无关 `GPT&Grok` 子树。
 - 新增回归覆盖会话轮换共享IP配额：同一IP不同sid使用不同sid键、同IP键一致；任一IP桶拒绝时整体429。GET `/session` 使用独立状态桶；observe拒绝只记事件并仍返回状态，enforce 返回429。
-- Worker打包及发布：Wrangler 4.125.0 dry-run成功；部署时首次因本地配置将远程路由误声明为custom domain且DNS由外部管理而失败，随后恢复为远程既有路由 `gimg.mtcacg.top/*`（zone `mtcacg.top`）再部署成功。当前版本 `a854cb77-cb47-4593-8e6f-dba4a0f04a5f`，绑定session10/min、status120/min、image600/min、JSON120/min、upstream180/min；部署后先为 `observe`，用户随后切至 `enforce`。运行时 `/session` 返回200及 `mode=enforce`，有会话时 `authenticated=true`。
+- Worker打包及首次发布：Wrangler 4.125.0 dry-run成功；部署时首次因本地配置将远程路由误声明为custom domain且DNS由外部管理而失败，随后恢复为远程既有路由 `gimg.mtcacg.top/*`（zone `mtcacg.top`）再部署成功。首次版本 `a854cb77-cb47-4593-8e6f-dba4a0f04a5f` 曾以 `observe` 发布，之后用户切至 `enforce`。现行版本与400/min配额见本报告前段“当前 Worker 配额部署”。
 - 前端修复：`node --test test/gimg-session.test.js` 通过，15/15（含遮罩显隐修复断言）；`node scripts/test-pages-search.js` 通过，涵盖根路径和 `/xrw-album/` 路径的会话资源复制与版本化；`node --check public/app.js`、`node --check public/gimg-session.js`、`git diff --check` 通过。
 - Pages静态构建：在相册仓库执行 `node scripts/build-gh-pages.js`，设置 `GITHUB_PAGES_BASE=/`、`GIMG_PUBLIC_BASE=https://gimg.mtcacg.top`、JSON回退地址及 1/2/3 数据源；生成 14973 个本地详情、416 个 shard，构建成功。缺少 `snapshot-data/batches`，因此该次构建的 Snapshot albums 为 0；不得用该本地产物发布替换线上数据。构建输出 `dist-gh-pages` 已被脚本覆写为本次本地验证产物。
 - Pages：commit `ea5e29acdee977be34b14846342840adbd80ec7d` 已推送到 `main`，workflow run 281 成功。真实浏览器使用 `?gimg-verify=1&v=20261010-session-1` 打开新版本并完成验证。
@@ -52,10 +58,10 @@ Turnstile 会话、图片缓存前验证、图片会话/IP 双层配额和公开
 - `wrangler.jsonc` 保留 `workers_dev=true`；启用 enforce 前需检查该备用主机和其他入口，确认不会形成可绕过域名；Cookie是 gimg 主机的 host-only Cookie。
 - 图片响应仍带既有 `Access-Control-Allow-Origin: *`。已在真实浏览器确认跨站原生 `<img>` 携带会话Cookie成功；跨源 `/session` fetch 使用 `credentials: include` 和精确来源CORS。
 
-## 生产发布门禁（待核实）
+## 持续运维与剩余核验
 
 1. 确认Turnstile widget允许 `album.mtcacg.top` 且action为 `gimg_session`；Secret不应出现在仓库、日志或聊天记录中。
 2. 已部署暂定namespace IDs 1001–1005；Wrangler 4.125.0未提供 `ratelimit list` 命令，本地无法独立核查账号级命名空间唯一性。
-3. Worker observe已发布；检查workers.dev和备用路由、Cloudflare缓存规则，以及旧缓存策略。过去浏览器已缓存或下载的图片不可通过新会话撤回。
-4. Pages新版本及一次Turnstile→会话POST/GET→原生图片请求已端到端验证；多标签、移动网络、JSON回退、续期及限流体验仍需额外覆盖，再由用户决定是否改为 `enforce`。回退：observe继续兼容；off恢复旧行为。
-5. Cloudflare Rate Limiting binding是colo级近似预算、非精确全局额度；`enforce` 现已运行。需要留意实际误拦与限流命中，并准备回退至 `observe`。
+3. Worker enforce现已部署；仍需定期检查workers.dev和备用路由、Cloudflare缓存规则，以及旧缓存策略。过去浏览器已缓存或下载的图片不可通过新会话撤回。
+4. Pages新版本及一次Turnstile→会话POST/GET→原生图片请求已端到端验证；移动网络、JSON回退、续期、持续流量与限流体验仍应监测。当前 `enforce` 已运行；出现误拦时可回退至 `observe`（继续发会话但图片不限会话/配额拦截），紧急回退 `off` 恢复旧图片响应缓存行为。
+5. Cloudflare Rate Limiting binding是colo级近似预算、非精确全局额度；`enforce` 与400/min图像配额现已运行。留意实际误拦与限流命中；本次未做高并发压测。

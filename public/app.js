@@ -1,6 +1,7 @@
 import { parseSearch, matchesSearch, quoteSearchValue, searchToFields, buildSearchQuery } from "./search.js?v=20260918-2";
 
 import { createGimgSession, createTurnstilePanel, isGimgUrl } from "./gimg-session.js?v=20261010-4";
+import { rankHotAlbums } from "./hot-ranking.js?v=20261011-1";
 
 const app = document.querySelector("#app");
 const verifyGimgSession = new URLSearchParams(location.search).get("gimg-verify") === "1";
@@ -539,25 +540,13 @@ function staticShuffledAlbums(albums, seedValue) {
   return result;
 }
 
-const hotAlbumLimit = 12;
-
-// 热度模式：浏览量最高的若干图包排在最前，其余照常打乱后跟在后面。
-// 只按浏览量降序会把绝大多数零浏览量的图包挤成并列，所以尾部仍然洗牌。
+// 热度模式：所有有浏览量的图包按浏览量排序，零浏览量图包随机置后。
 function staticPopularAlbums(albums, seedValue) {
   const seed = String(seedValue || "default");
   const key = `hot:${seed}`;
   if (staticData.randomAlbums.has(key)) return staticData.randomAlbums.get(key);
 
-  const ranked = albums
-    .filter((album) => Number(album.views) > 0)
-    .sort((left, right) => Number(right.views) - Number(left.views) || String(left.id).localeCompare(String(right.id)))
-    .slice(0, hotAlbumLimit);
-  const head = new Set(ranked.map((album) => album.id));
-  const tail = staticShuffledAlbums(
-    albums.filter((album) => !head.has(album.id)),
-    `hot-tail:${seed}`
-  );
-  const result = [...ranked, ...tail];
+  const result = rankHotAlbums(albums, seed, staticShuffledAlbums);
   staticData.randomAlbums.set(key, result);
   while (staticData.randomAlbums.size > 8) {
     staticData.randomAlbums.delete(staticData.randomAlbums.keys().next().value);

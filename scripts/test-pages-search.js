@@ -10,7 +10,7 @@ const fixture = await fs.mkdtemp(path.join(root, ".pages-search-"));
 assert.ok(fixture.startsWith(root + path.sep));
 try {
   for (const dir of ["scripts", "public", "data/photos"]) await fs.mkdir(path.join(fixture, dir), { recursive: true });
-  for (const file of ["scripts/build-gh-pages.js", "scripts/snapshot-order.js", "public/index.html", "public/app.js", "public/styles.css", "public/search.js", "public/gimg-session.js"]) {
+  for (const file of ["scripts/build-gh-pages.js", "scripts/snapshot-order.js", "public/index.html", "public/app.js", "public/styles.css", "public/search.js", "public/gimg-session.js", "public/hot-ranking.js", "scripts/umami-metrics.js"]) {
     await fs.copyFile(path.join(root, file), path.join(fixture, file));
   }
   await fs.writeFile(path.join(fixture, "data/albums.json"), "[]");
@@ -23,16 +23,18 @@ try {
     const output = path.join(fixture, "dist-gh-pages");
     const html = await fs.readFile(path.join(output, "index.html"), "utf8");
     const prefix = base === "/" ? "" : "/xrw-album";
-    assert.ok(html.includes(`src="${prefix}/app.js?v=20261010-session-5"`));
+    assert.ok(html.includes(`src="${prefix}/app.js?v=20261011-hot-all-1"`));
     assert.ok(html.includes(`href="${prefix}/styles.css?v=20261010-mobile-gallery-1"`));
     assert.ok(html.includes(`window.__XRW_STATIC_DATA_BASE = "${prefix}/data"`));
     assert.equal(await fs.readFile(path.join(output, "search.js"), "utf8"), await fs.readFile(path.join(root, "public/search.js"), "utf8"));
     assert.equal(await fs.readFile(path.join(output, "gimg-session.js"), "utf8"), await fs.readFile(path.join(root, "public/gimg-session.js"), "utf8"));
+    assert.equal(await fs.readFile(path.join(output, "hot-ranking.js"), "utf8"), await fs.readFile(path.join(root, "public/hot-ranking.js"), "utf8"));
     const js = await fs.readFile(path.join(output, "app.js"), "utf8");
     assert.match(js, /from "\.\/search\.js\?v=20260918-2"/);
+    assert.match(js, /from "\.\/hot-ranking\.js\?v=20261011-1"/);
     assert.equal(await fs.readFile(path.join(output, "404.html"), "utf8"), html);
   }
 } finally {
   await fs.rm(fixture, { recursive: true, force: true });
 }
-console.log("Pages build: custom domain and /xrw-album/ paths include the search module and versioned assets.");
+console.log("Pages build: custom domain and /xrw-album/ paths include the search and hot-ranking modules with versioned assets.");

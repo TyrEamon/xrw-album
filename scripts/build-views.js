@@ -3,6 +3,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { fetchMetricPages } from "./umami-metrics.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -14,7 +15,8 @@ const baseUrl = String(process.env.UMAMI_BASE_URL || "https://u.mtcacg.top").rep
 const shareId = String(process.env.UMAMI_SHARE_ID || "").trim();
 const pathPrefix = String(process.env.UMAMI_PATH_PREFIX || "/album/").trim();
 const windowDays = Math.max(1, Number(process.env.UMAMI_WINDOW_DAYS || 30));
-const pathLimit = Math.max(1, Number(process.env.UMAMI_PATH_LIMIT || 1000));
+const pathLimit = Math.max(1, Math.min(1000, Number(process.env.UMAMI_PATH_LIMIT || 1000)));
+const maxPathRows = Math.max(pathLimit, Math.min(1000000, Number(process.env.UMAMI_MAX_PATH_ROWS || 100000)));
 
 function albumIdFromPath(value) {
   if (!value.startsWith(pathPrefix)) return "";
@@ -58,7 +60,15 @@ async function main() {
     limit: String(pathLimit),
     timezone: "Asia/Shanghai"
   });
-  const metrics = await fetchJson(`${baseUrl}/api/websites/${websiteId}/metrics?${windowQuery}`, headers);
+  const metrics = await fetchMetricPages({
+    baseUrl,
+    websiteId,
+    headers,
+    query: windowQuery,
+    pageLimit: pathLimit,
+    maxRows: maxPathRows,
+    fetchJson
+  });
 
   // 顶栏那个数字和图集总数并列，是累计值，所以取全部时间。
   const totalQuery = new URLSearchParams({

@@ -40,7 +40,7 @@ jobs:
       - name: Verify session client and Pages assets
         working-directory: site
         run: |
-          node --test test/gimg-session.test.js
+          node --test test/gimg-session.test.js test/hot-ranking.test.js scripts/test-umami-metrics.js
           node scripts/test-pages-search.js
 
       - name: Build static gallery
