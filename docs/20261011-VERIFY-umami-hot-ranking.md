@@ -29,4 +29,5 @@
 - GitHub Actions run 300，commit `cba34f55aac0fc357679e720b61a865e0b9559f0`：Success；Pages部署任务成功。
 - 线上 `https://album.mtcacg.top/` 返回200，HTML引用 `app.js?v=20261011-hot-all-1`；`hot-ranking.js?v=20261011-1` 返回200且含排序函数。
 - 线上 `data/albums.json` 有38506项、64项views>0；`manifest.json builtAt=2026-10-12T04:14:42.148Z`。浏览器端以线上数据调用新排序函数，验证正views降序、零views位于尾部。
-- 本次只验证了线上发布的静态views数据与排序模块，未单独观测Umami API新分页请求/凭据；下次常规构建才会应用新分页采集代码。不执行本地全站构建以免用缺失snapshot或陈旧数据覆盖产物。
+- Pages run 300的构建已包含新版Umami分页采集代码（代码随cba34f55提交，push会触发部署）；但本次未单独观测Umami API分页请求/凭据，线上views数量无法单独证明分页完整性。不执行本地全站构建以免用缺失snapshot或陈旧数据覆盖产物。
+- 定时构建已改为每2小时：cron `17 */2 * * *`，即UTC每偶数小时的17分；此外main push和workflow_dispatch仍会触发构建。该调整从本次workflow配置提交后生效。
