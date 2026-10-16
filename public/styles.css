@@ -1651,12 +1651,6 @@ img {
   transform: translateY(0);
 }
 
-.back-to-top.is-clear-search {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
-}
-
 .back-to-top:hover,
 .back-to-top:focus-visible {
   color: var(--accent-contrast);

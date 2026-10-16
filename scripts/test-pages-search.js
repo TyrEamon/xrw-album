@@ -23,8 +23,8 @@ try {
     const output = path.join(fixture, "dist-gh-pages");
     const html = await fs.readFile(path.join(output, "index.html"), "utf8");
     const prefix = base === "/" ? "" : "/xrw-album";
-    assert.ok(html.includes(`src="${prefix}/app.js?v=20261011-hot-all-1"`));
-    assert.ok(html.includes(`href="${prefix}/styles.css?v=20261010-mobile-gallery-1"`));
+    assert.ok(html.includes(`src="${prefix}/app.js?v=20261016-back-to-top-1"`));
+    assert.ok(html.includes(`href="${prefix}/styles.css?v=20261016-back-to-top-1"`));
     assert.ok(html.includes(`window.__XRW_STATIC_DATA_BASE = "${prefix}/data"`));
     assert.equal(await fs.readFile(path.join(output, "search.js"), "utf8"), await fs.readFile(path.join(root, "public/search.js"), "utf8"));
     assert.equal(await fs.readFile(path.join(output, "gimg-session.js"), "utf8"), await fs.readFile(path.join(root, "public/gimg-session.js"), "utf8"));
@@ -32,6 +32,8 @@ try {
     const js = await fs.readFile(path.join(output, "app.js"), "utf8");
     assert.match(js, /from "\.\/search\.js\?v=20260918-2"/);
     assert.match(js, /from "\.\/hot-ranking\.js\?v=20261011-1"/);
+    assert.match(js, /class="back-to-top" data-back-to-top aria-label="回到顶部"/);
+    assert.ok(!js.includes("is-clear-search"), "back-to-top must stay a pure scroll-to-top control");
     assert.equal(await fs.readFile(path.join(output, "404.html"), "utf8"), html);
   }
 } finally {
