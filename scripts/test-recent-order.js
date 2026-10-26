@@ -60,11 +60,50 @@ try {
   }));
   execFileSync(process.execPath, [path.join(rootDir, "scripts/build-data-bucket.js")], {
     cwd: rootDir,
-    env: { ...process.env, BUCKET_ID: "test", BUCKET_SNAPSHOT_DATA_DIR: batches, BUCKET_OUT_DIR: output }
+    env: {
+      ...process.env,
+      BUCKET_ID: "test",
+      BUCKET_SNAPSHOT_DATA_DIR: batches,
+      BUCKET_OUT_DIR: output,
+      // A mirror no longer publishes a duplicate catalog by default, but the ordering
+      // assertions below are about the catalog itself, so ask for it explicitly.
+      BUCKET_PUBLISH_CATALOG: "1"
+    }
   });
   const built = JSON.parse(await fs.readFile(path.join(output, "albums.json"), "utf8"));
   assert.deepEqual(built.map((item) => item.id), ["veil", "beide"]);
   assert.equal(built[1].publishedAt, "2026-09-13T07:09:40.000Z");
+
+  // Default build: shards only, range declared in the manifest, no catalog to download.
+  // Range partitioning only understands "veil-<n>" ids, so use those here.
+  const leanBatches = path.join(tempDir, "batches-lean");
+  await fs.mkdir(leanBatches);
+  await fs.writeFile(path.join(leanBatches, "lean.json"), JSON.stringify({
+    exported_at: "2026-09-13T07:09:40Z",
+    galleries: [gallery("veil-7", "in range"), gallery("veil-40000", "out of range")]
+  }));
+  const leanOut = path.join(tempDir, "output-lean");
+  execFileSync(process.execPath, [path.join(rootDir, "scripts/build-data-bucket.js")], {
+    cwd: rootDir,
+    env: {
+      ...process.env,
+      BUCKET_ID: "test",
+      BUCKET_SNAPSHOT_DATA_DIR: leanBatches,
+      BUCKET_OUT_DIR: leanOut,
+      BUCKET_MIN_GALLERY_ID: "1",
+      BUCKET_MAX_GALLERY_ID: "33720"
+    }
+  });
+  await assert.rejects(fs.access(path.join(leanOut, "albums.json")), "A mirror must not publish a duplicate catalog");
+  const leanManifest = JSON.parse(await fs.readFile(path.join(leanOut, "manifest.json"), "utf8"));
+  assert.equal(leanManifest.catalog, undefined, "Manifest must not advertise a catalog it does not ship");
+  assert.equal(leanManifest.minGalleryId, 1);
+  assert.equal(leanManifest.maxGalleryId, 33720);
+  assert.equal(leanManifest.albumCount, 1, "Range must keep only in-range galleries");
+  const leanShards = await fs.readdir(path.join(leanOut, "photo-shards"));
+  assert.equal(leanShards.length, 1, "Mirror must still publish detail shards");
+  const leanShard = JSON.parse(await fs.readFile(path.join(leanOut, "photo-shards", leanShards[0]), "utf8"));
+  assert.deepEqual(Object.keys(leanShard), ["veil-7"], "Shard must carry the in-range gallery only");
 } finally {
   await fs.rm(tempDir, { recursive: true, force: true });
 }

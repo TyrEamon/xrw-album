@@ -412,12 +412,28 @@ async function staticSources() {
 async function staticCatalogs() {
   if (!staticData.catalogs) {
     const sources = await staticSources();
-    staticData.catalogs = await Promise.all(sources.map(async (source) => {
+    // Stage 1: manifests only. They are a few hundred bytes, so we can cheaply learn
+    // which mirrors are empty before paying for their album catalog.
+    const announced = await Promise.all(sources.map(async (source) => {
       try {
-        const [manifest, albums] = await Promise.all([
-          fetchStaticJson("manifest.json", source.base, source.id),
-          fetchStaticJson("albums.json", source.base, source.id)
-        ]);
+        const manifest = await fetchStaticJson("manifest.json", source.base, source.id);
+        return { source, manifest };
+      } catch (error) {
+        if (source.id === "main") throw error;
+        console.warn(`External data source unavailable: ${source.id}`, error);
+        return null;
+      }
+    }));
+
+    // Stage 2: fetch album catalogs, but only from mirrors that actually publish one.
+    // A mirror's catalog is byte-identical to main's for every field it serves (only
+    // `bucket` and a snapshotted `publishedAt` differ), so a mirror that declares no
+    // `catalog` is catalogued purely by its manifest range and contributes nothing to
+    // the merge. Downloading its catalog was ~2.9 MB gzipped per visit for no new data.
+    const loaded = await Promise.all(announced.filter(Boolean).map(async ({ source, manifest }) => {
+      if (source.id !== "main" && !manifest?.catalog) return { source, manifest, albums: null };
+      try {
+        const albums = await fetchStaticJson("albums.json", source.base, source.id);
         if (!Array.isArray(albums)) throw new Error("Static album catalog is invalid");
         return {
           source,
@@ -426,11 +442,12 @@ async function staticCatalogs() {
         };
       } catch (error) {
         if (source.id === "main") throw error;
-        console.warn(`External data source unavailable: ${source.id}`, error);
+        console.warn(`External album catalog unavailable: ${source.id}`, error);
         return null;
       }
     }));
-    staticData.catalogs = staticData.catalogs.filter(Boolean);
+
+    staticData.catalogs = loaded.filter(Boolean);
   }
   return staticData.catalogs;
 }
@@ -442,7 +459,7 @@ function mergeStaticCatalogAlbums(catalogs) {
     return Number.isFinite(time) ? time : 0;
   };
   for (const catalog of catalogs) {
-    for (const album of catalog.albums) {
+    for (const album of catalog.albums || []) {
       if (!album?.id) continue;
       const previous = albumsById.get(album.id);
       if (previous && publishedTime(previous) > publishedTime(album)) continue;
@@ -487,21 +504,85 @@ async function staticAlbums() {
   return staticData.albums;
 }
 
+// Only "veil-<n>" ids carry a comparable number; the legacy "<base36>-<hash>" ids
+// cannot be range partitioned, so they always resolve against main's shards.
+function galleryShardId(id) {
+  if (!String(id).startsWith("veil-")) return null;
+  const value = Number(String(id).slice("veil-".length));
+  return Number.isFinite(value) ? value : null;
+}
+
+function shardRangeOf(manifest) {
+  const min = Number(manifest?.minGalleryId);
+  const max = Number(manifest?.maxGalleryId);
+  const hasMin = Number.isFinite(min);
+  const hasMax = Number.isFinite(max) && manifest?.maxGalleryId !== null;
+  if (!hasMin && !hasMax) return null;
+  return { min: hasMin ? min : -Infinity, max: hasMax ? max : Infinity };
+}
+
+// Which mirror serves this gallery's detail shard. A mirror declares its share as an
+// id range in its manifest instead of publishing a duplicate album catalog, so this
+// is the only place the client learns about the split. Ranges must not overlap: a
+// silent overlap would route galleries to the wrong mirror, so it falls back to main
+// for every conflicted id and says so once.
+let shardRoutingChecked = false;
+
+function shardSourceFor(galleryId, catalogs) {
+  const main = catalogs.find((catalog) => catalog.source.id === "main");
+  const candidates = [];
+  for (const catalog of catalogs) {
+    if (catalog.source.id === "main") continue;
+    const range = shardRangeOf(catalog.manifest);
+    if (!range) continue;
+    candidates.push({ source: catalog.source, range });
+  }
+  if (!candidates.length) return main?.source || null;
+  if (galleryId == null) return main?.source || null;
+
+  const hits = candidates.filter(({ range }) => galleryId >= range.min && galleryId <= range.max);
+  if (hits.length <= 1) return hits[0]?.source || main?.source || null;
+
+  if (!shardRoutingChecked) {
+    shardRoutingChecked = true;
+    console.warn("Overlapping detail-shard ranges; those galleries fall back to main", hits.map(({ source, range }) => `${source.id}:${range.min}..${range.max}`));
+  }
+  return main?.source || null;
+}
+
 async function staticAlbumDetail(id, albumHint = null) {
   if (!staticData.details.has(id)) {
     const album = albumHint || (await staticAlbums()).find((item) => item.id === id);
     if (!album) throw new Error(`Static album not found: ${id}`);
     const sources = await staticSources();
-    const source = sources.find((item) => item.id === (album.bucket || "main"));
-    if (!source) throw new Error(`Static data source not found: ${album.bucket || "main"}`);
+    // A mirror may have gone away since the catalog was merged, so the routed source is
+    // only a preference: fall back to main's shard before giving up on the detail.
+    const catalogs = await staticCatalogs();
+    const preferred = album.bucket
+      ? sources.find((item) => item.id === album.bucket)
+      : shardSourceFor(galleryShardId(id), catalogs);
+    const source = [preferred, sources.find((item) => item.id === "main")].filter(Boolean)
+      .filter((item, index, list) => list.findIndex((other) => other.id === item.id) === index);
+    if (!source.length) throw new Error(`Static data source not found: ${album.bucket || "main"}`);
+
     const shardKey = photoShardKey(id);
-    const cacheKey = `${source.id}:${shardKey}`;
-    if (!staticData.shards.has(cacheKey)) {
-      staticData.shards.set(cacheKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`, source.base, source.id));
+    for (const candidate of source) {
+      const cacheKey = `${candidate.id}:${shardKey}`;
+      try {
+        if (!staticData.shards.has(cacheKey)) {
+          staticData.shards.set(cacheKey, await fetchStaticJson(`photo-shards/${encodeURIComponent(shardKey)}.json`, candidate.base, candidate.id));
+        }
+      } catch (error) {
+        console.warn(`Detail shard unavailable from ${candidate.id}: ${shardKey}`, error);
+        continue;
+      }
+      const detail = staticData.shards.get(cacheKey)?.[id];
+      if (detail) {
+        staticData.details.set(id, detail);
+        return detail;
+      }
     }
-    const detail = staticData.shards.get(cacheKey)?.[id];
-    if (!detail) throw new Error(`Static album detail not found: ${id}`);
-    staticData.details.set(id, detail);
+    throw new Error(`Static album detail not found: ${id}`);
   }
   return staticData.details.get(id);
 }
