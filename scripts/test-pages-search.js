@@ -23,7 +23,7 @@ try {
     const output = path.join(fixture, "dist-gh-pages");
     const html = await fs.readFile(path.join(output, "index.html"), "utf8");
     const prefix = base === "/" ? "" : "/xrw-album";
-    assert.ok(html.includes(`src="${prefix}/app.js?v=20261016-back-to-top-1"`));
+    assert.ok(html.includes(`src="${prefix}/app.js?v=20261026-bucket-catalog-1"`));
     assert.ok(html.includes(`href="${prefix}/styles.css?v=20261016-back-to-top-1"`));
     assert.ok(html.includes(`window.__XRW_STATIC_DATA_BASE = "${prefix}/data"`));
     assert.equal(await fs.readFile(path.join(output, "search.js"), "utf8"), await fs.readFile(path.join(root, "public/search.js"), "utf8"));
