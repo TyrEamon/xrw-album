@@ -374,8 +374,9 @@ async function fetchStaticJson(path, sourceBase = "", sourceId = "main") {
     return await fetchJsonWithTimeout(directUrl, DIRECT_JSON_TIMEOUT);
   } catch (directError) {
     if (!JSON_FALLBACK_BASE) throw directError;
-    // The gimg worker only serves /json/<sourceId>/<path>; anything else is a 404.
-    const fallbackUrl = `${JSON_FALLBACK_BASE}/json/${encodeURIComponent(sourceId)}/${path.replace(/^\/+/, "")}`;
+    // JSON_FALLBACK_BASE already ends in /json (see window.__XRW_JSON_FALLBACK_BASE),
+    // so append only sourceId/path; adding /json again yields /json/json/... and a 404.
+    const fallbackUrl = `${JSON_FALLBACK_BASE}/${encodeURIComponent(sourceId)}/${path.replace(/^\/+/, "")}`;
     console.warn(`Direct static data unavailable; using gimg fallback: ${sourceId}/${path}`, directError);
     // The public JSON mirror uses wildcard CORS, so keep it credential-free.
     return fetchJsonWithTimeout(fallbackUrl, FALLBACK_JSON_TIMEOUT);
