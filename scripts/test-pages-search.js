@@ -6,6 +6,13 @@ import { fileURLToPath } from "node:url";
 
 // A tiny build fixture avoids copying the full photo archive or downloading dependencies.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Read the version strings from the source page so bumping an asset version
+// does not silently break this check.
+const sourceHtml = await fs.readFile(path.join(root, "public/index.html"), "utf8");
+const appVersion = sourceHtml.match(/\/app\.js\?v=([^"']+)/)?.[1];
+const cssVersion = sourceHtml.match(/\/styles\.css\?v=([^"']+)/)?.[1];
+assert.ok(appVersion, "public/index.html must reference a versioned app.js");
+assert.ok(cssVersion, "public/index.html must reference a versioned styles.css");
 const fixture = await fs.mkdtemp(path.join(root, ".pages-search-"));
 assert.ok(fixture.startsWith(root + path.sep));
 try {
@@ -23,8 +30,8 @@ try {
     const output = path.join(fixture, "dist-gh-pages");
     const html = await fs.readFile(path.join(output, "index.html"), "utf8");
     const prefix = base === "/" ? "" : "/xrw-album";
-    assert.ok(html.includes(`src="${prefix}/app.js?v=20261026-bucket-catalog-1"`));
-    assert.ok(html.includes(`href="${prefix}/styles.css?v=20261016-back-to-top-1"`));
+    assert.ok(html.includes(`src="${prefix}/app.js?v=${appVersion}"`));
+    assert.ok(html.includes(`href="${prefix}/styles.css?v=${cssVersion}"`));
     assert.ok(html.includes(`window.__XRW_STATIC_DATA_BASE = "${prefix}/data"`));
     assert.equal(await fs.readFile(path.join(output, "search.js"), "utf8"), await fs.readFile(path.join(root, "public/search.js"), "utf8"));
     assert.equal(await fs.readFile(path.join(output, "gimg-session.js"), "utf8"), await fs.readFile(path.join(root, "public/gimg-session.js"), "utf8"));
