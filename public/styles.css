@@ -846,10 +846,12 @@ img {
   gap: clamp(44px, 6vw, 80px);
 }
 
+/* No content-visibility here: page virtualization already empties off-screen
+   pages, and `content-visibility: auto` makes offsetHeight report the intrinsic
+   size (1800px) instead of the real height, which corrupts the stored page
+   height and makes the scroll position jump. */
 .album-page {
   contain: layout paint style;
-  content-visibility: auto;
-  contain-intrinsic-size: 1800px;
 }
 
 .album-page.is-placeholder {
@@ -1504,8 +1506,6 @@ img {
   /* Paint containment would clip the items a page pushes up into the previous
      page's short columns, so keep layout/style containment only. */
   contain: layout style;
-  content-visibility: auto;
-  contain-intrinsic-size: 1200px;
 }
 
 .photo-page.is-placeholder,
