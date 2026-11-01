@@ -2066,11 +2066,14 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
   const columnCount = Math.min(availableColumns, scaleColumnLimit);
   const columnWidth = (config.width - (columnCount - 1) * config.gap) / columnCount;
   const pages = [];
+  // Column heights carry across pages so each page continues the previous
+  // page's stagger instead of restarting its own waterfall.
+  const columns = Array(columnCount).fill(0);
 
   for (let offset = 0; offset < photos.length; offset += PHOTO_PAGE_SIZE) {
     const pageNumber = pages.length + 1;
     const previous = previousPages.find((entry) => entry.page === pageNumber);
-    const columns = Array(columnCount).fill(0);
+    const baseColumns = columns.slice();
     const items = photos.slice(offset, offset + PHOTO_PAGE_SIZE).map((photo, index) => {
       const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
         ? { width: Number(photo.width), height: Number(photo.height) }
@@ -2085,12 +2088,15 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
         displayWidth: columnWidth,
         displayHeight,
         displayX: column * (columnWidth + config.gap),
-        displayY: columns[column]
+        displayY: columns[column] - baseColumns[column]
       };
       columns[column] += displayHeight + config.gap;
       return item;
     });
-    const layoutHeight = Math.max(0, ...columns) - (items.length ? config.gap : 0);
+    const layoutHeight = Math.max(
+      0,
+      Math.max(...columns) - Math.min(...baseColumns) - (items.length ? config.gap : 0)
+    );
     const entry = {
       page: pageNumber,
       layout: "masonry",

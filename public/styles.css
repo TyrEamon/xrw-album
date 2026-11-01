@@ -1686,6 +1686,12 @@ img {
   color: var(--ink-2);
 }
 
+.photos-waterfall.is-album-scope {
+  /* Page heights already include the inter-item gap, so the flex gap between
+     page shells would break the waterfall continuity across page boundaries. */
+  gap: 0;
+}
+
 .photos-waterfall.is-album-scope .photo-page {
   position: relative;
   display: block;
