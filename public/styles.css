@@ -1501,7 +1501,9 @@ img {
   flex-wrap: wrap;
   gap: 8px;
   align-items: flex-start;
-  contain: layout paint style;
+  /* Paint containment would clip the items a page pushes up into the previous
+     page's short columns, so keep layout/style containment only. */
+  contain: layout style;
   content-visibility: auto;
   contain-intrinsic-size: 1200px;
 }

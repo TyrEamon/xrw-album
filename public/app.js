@@ -2066,14 +2066,14 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
   const columnCount = Math.min(availableColumns, scaleColumnLimit);
   const columnWidth = (config.width - (columnCount - 1) * config.gap) / columnCount;
   const pages = [];
-  // Column heights carry across pages so each page continues the previous
-  // page's stagger instead of restarting its own waterfall.
+  // Column heights and page offsets share one global Y axis, so a page's items
+  // can sit above its own top edge and still line up with the previous page.
   const columns = Array(columnCount).fill(0);
+  let pageOrigin = 0;
 
   for (let offset = 0; offset < photos.length; offset += PHOTO_PAGE_SIZE) {
     const pageNumber = pages.length + 1;
     const previous = previousPages.find((entry) => entry.page === pageNumber);
-    const baseColumns = columns.slice();
     const touchedColumns = [];
     const items = photos.slice(offset, offset + PHOTO_PAGE_SIZE).map((photo, index) => {
       const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
@@ -2090,21 +2090,17 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
         displayWidth: columnWidth,
         displayHeight,
         displayX: column * (columnWidth + config.gap),
-        displayY: columns[column] - baseColumns[column]
+        displayY: columns[column] - pageOrigin
       };
       columns[column] += displayHeight + config.gap;
       return item;
     });
-    // Measure only the columns this page actually filled; untouched columns keep
-    // their older, taller offsets and would otherwise inflate the page height.
-    const layoutHeight = touchedColumns.length
-      ? Math.max(
-        0,
-        Math.max(...touchedColumns.map((column) => columns[column]))
-          - Math.min(...touchedColumns.map((column) => baseColumns[column]))
-          - config.gap
-      )
-      : 0;
+    // The page owns the band from its own origin down to its tallest column, so
+    // short columns leave their gap for the next page to fill instead of padding.
+    const pageBottom = touchedColumns.length
+      ? Math.max(...touchedColumns.map((column) => columns[column])) - config.gap
+      : pageOrigin;
+    const layoutHeight = Math.max(0, pageBottom - pageOrigin);
     const entry = {
       page: pageNumber,
       layout: "masonry",
@@ -2115,6 +2111,7 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
     entry.layoutSignature = photoPageLayoutSignature(entry);
     if (previous?.layoutSignature === entry.layoutSignature) entry.rendered = previous.rendered;
     pages.push(entry);
+    pageOrigin = pageBottom;
   }
 
   return pages;
