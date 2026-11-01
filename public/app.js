@@ -2074,6 +2074,7 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
     const pageNumber = pages.length + 1;
     const previous = previousPages.find((entry) => entry.page === pageNumber);
     const baseColumns = columns.slice();
+    const touchedColumns = [];
     const items = photos.slice(offset, offset + PHOTO_PAGE_SIZE).map((photo, index) => {
       const suppliedSize = Number(photo.width) > 0 && Number(photo.height) > 0
         ? { width: Number(photo.width), height: Number(photo.height) }
@@ -2082,6 +2083,7 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
       const ratio = Math.min(2.8, Math.max(0.45, Number.isFinite(rawRatio) ? rawRatio : 0.75));
       const column = columns.indexOf(Math.min(...columns));
       const displayHeight = columnWidth / ratio;
+      if (!touchedColumns.includes(column)) touchedColumns.push(column);
       const item = {
         ...photo,
         sourceIndex: offset + index,
@@ -2093,10 +2095,16 @@ function createMasonryPhotoPages(photos, config, previousPages = []) {
       columns[column] += displayHeight + config.gap;
       return item;
     });
-    const layoutHeight = Math.max(
-      0,
-      Math.max(...columns) - Math.min(...baseColumns) - (items.length ? config.gap : 0)
-    );
+    // Measure only the columns this page actually filled; untouched columns keep
+    // their older, taller offsets and would otherwise inflate the page height.
+    const layoutHeight = touchedColumns.length
+      ? Math.max(
+        0,
+        Math.max(...touchedColumns.map((column) => columns[column]))
+          - Math.min(...touchedColumns.map((column) => baseColumns[column]))
+          - config.gap
+      )
+      : 0;
     const entry = {
       page: pageNumber,
       layout: "masonry",
